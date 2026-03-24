@@ -1,141 +1,389 @@
-<script>
-function downloadTemplate() {
-  const csvContent = "SKU,Description,CurrentStock,MonthlyDemand,LeadTimeDays\nA,Item A,100,300,10\nB,Item B,50,200,15";
-  const blob = new Blob([csvContent], { type: "text/csv" });
-  const url = window.URL.createObjectURL(blob);
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "reorderreport-template.csv";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  window.URL.revokeObjectURL(url);
-}
-
-function handleUpload() {
-  const file = document.getElementById("fileInput").files[0];
-
-  if (!file) {
-    document.getElementById("status").innerHTML = "<p>Please upload a CSV file.</p>";
-    return;
-  }
-
-  const reader = new FileReader();
-
-  reader.onload = function(event) {
-    const text = event.target.result.trim();
-    const rows = text.split("\n").map(r => r.split(","));
-
-    if (rows.length < 2) {
-      document.getElementById("status").innerHTML = "<p>CSV is empty.</p>";
-      return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CB1 Online</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      text-align: center;
+      padding: 50px;
+      margin: 0;
     }
 
-    const headers = rows[0].map(h => h.trim());
-    const data = rows.slice(1);
+    .box {
+      background: #1e293b;
+      padding: 30px;
+      border-radius: 10px;
+      max-width: 1100px;
+      margin: auto;
+      box-sizing: border-box;
+    }
 
-    // Detect columns
-    const hasHistory = headers.includes("M1");
+    input, button {
+      margin-top: 15px;
+      padding: 10px;
+      width: 100%;
+      border-radius: 5px;
+      border: none;
+      box-sizing: border-box;
+    }
 
-    let urgentCount = 0;
-    let lowCount = 0;
-    let nextStockout = Infinity;
-    let totalOrder = 0;
+    button {
+      background: #22c55e;
+      color: black;
+      font-weight: bold;
+      cursor: pointer;
+    }
 
-    let output = "<h3>Summary</h3><div style='margin-bottom:15px;'>";
+    .secondary-btn {
+      background: #334155;
+      color: white;
+    }
 
-    let table = "<div class='table-wrap'><table><tr>";
+    .summary-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+      text-align: left;
+    }
 
-    headers.forEach(h => table += `<th>${h}</th>`);
-    table += "<th>Forecast</th><th>Safety Stock</th><th>Days to Stockout</th><th>Reorder Qty</th><th>Status</th><th>Reason</th></tr>";
+    .summary-card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 14px;
+    }
 
-    data.forEach(row => {
-      if (row.length < 4) return;
+    .summary-card h4 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: #94a3b8;
+      font-weight: normal;
+    }
 
-      let stock = parseFloat(row[headers.indexOf("CurrentStock")]);
-      let lead = parseFloat(row[headers.indexOf("LeadTimeDays")]);
+    .summary-card p {
+      margin: 0;
+      font-size: 24px;
+      font-weight: bold;
+      color: #e2e8f0;
+    }
 
-      if (isNaN(stock) || isNaN(lead)) return;
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      margin-top: 20px;
+    }
 
-      // ===== FORECAST =====
-      let forecast;
+    table {
+      width: 100%;
+      min-width: 1200px;
+      border-collapse: collapse;
+      color: white;
+    }
 
-      if (hasHistory) {
-        let m1 = parseFloat(row[headers.indexOf("M1")]) || 0;
-        let m2 = parseFloat(row[headers.indexOf("M2")]) || 0;
-        let m3 = parseFloat(row[headers.indexOf("M3")]) || 0;
+    th, td {
+      border: 1px solid #475569;
+      padding: 8px;
+      text-align: center;
+      vertical-align: top;
+    }
 
-        forecast = (m1 + m2 + m3) / 3;
-      } else {
-        forecast = parseFloat(row[headers.indexOf("MonthlyDemand")]);
+    th {
+      background: #0f172a;
+      position: sticky;
+      top: 0;
+    }
+
+    td.reason {
+      text-align: left;
+      min-width: 260px;
+    }
+
+    #status {
+      margin-top: 20px;
+    }
+
+    .muted {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="box">
+    <h1>CB1 Online</h1>
+    <p>Upload stock and usage data. Get a clear, explainable reorder decision.</p>
+
+    <input type="file" id="fileInput" accept=".csv">
+    <button type="button" class="secondary-btn" onclick="downloadSimpleTemplate()">Download Simple Template</button>
+    <button type="button" class="secondary-btn" onclick="downloadAdvancedTemplate()">Download Advanced Template</button>
+    <button type="button" onclick="handleUpload()">Generate Decision Report</button>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    function downloadSimpleTemplate() {
+      const csvContent =
+`SKU,Description,CurrentStock,MonthlyDemand,LeadTimeDays
+A,Item A,100,300,10
+B,Item B,50,200,15`;
+
+      downloadCsv(csvContent, "cb1-simple-template.csv");
+    }
+
+    function downloadAdvancedTemplate() {
+      const csvContent =
+`SKU,Description,CurrentStock,LeadTimeDays,OnOrderQty,UnitCost,Supplier,MOQ,OrderMultiple,M1,M2,M3
+A,Item A,100,10,0,2.50,Supplier A,0,1,200,250,300
+B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
+
+      downloadCsv(csvContent, "cb1-advanced-template.csv");
+    }
+
+    function downloadCsv(content, fileName) {
+      const blob = new Blob([content], { type: "text/csv" });
+      const url = window.URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      window.URL.revokeObjectURL(url);
+    }
+
+    function parseCsvLine(line) {
+      return line.split(",").map(cell => cell.trim());
+    }
+
+    function roundUpToMultiple(value, multiple) {
+      if (!multiple || multiple <= 1) return Math.ceil(value);
+      return Math.ceil(value / multiple) * multiple;
+    }
+
+    function handleUpload() {
+      const file = document.getElementById("fileInput").files[0];
+
+      if (!file) {
+        document.getElementById("status").innerHTML = "<p>Please upload a CSV file.</p>";
+        return;
       }
 
-      if (!forecast || forecast <= 0) return;
+      const reader = new FileReader();
 
-      let daily = forecast / 30;
+      reader.onload = function(event) {
+        const text = event.target.result.trim();
+        const rows = text.split(/\r?\n/).map(parseCsvLine);
 
-      // ===== SAFETY STOCK =====
-      let safetyDays = 7;
-      let safetyStock = daily * safetyDays;
+        if (rows.length < 2) {
+          document.getElementById("status").innerHTML = "<p>The CSV looks empty.</p>";
+          return;
+        }
 
-      // ===== REORDER =====
-      let reorderPoint = (daily * lead) + safetyStock;
-      let reorderQty = Math.max(0, reorderPoint - stock);
+        const headers = rows[0];
+        const data = rows.slice(1);
 
-      // ===== STOCKOUT =====
-      let daysToStockout = stock / daily;
+        const requiredSimple = ["SKU", "Description", "CurrentStock", "LeadTimeDays"];
+        const hasMonthlyDemand = headers.includes("MonthlyDemand");
+        const hasHistory = headers.includes("M1") && headers.includes("M2") && headers.includes("M3");
 
-      // ===== STATUS =====
-      let status = "OK";
+        for (const col of requiredSimple) {
+          if (!headers.includes(col)) {
+            document.getElementById("status").innerHTML = `<p>Missing required column: <strong>${col}</strong></p>`;
+            return;
+          }
+        }
 
-      if (daysToStockout < lead) {
-        status = "URGENT";
-        urgentCount++;
-      } else if (daysToStockout < lead + safetyDays) {
-        status = "LOW";
-        lowCount++;
-      }
+        if (!hasMonthlyDemand && !hasHistory) {
+          document.getElementById("status").innerHTML =
+            "<p>You need either <strong>MonthlyDemand</strong> or history columns <strong>M1, M2, M3</strong>.</p>";
+          return;
+        }
 
-      if (daysToStockout < nextStockout) nextStockout = daysToStockout;
-      totalOrder += Math.ceil(reorderQty);
+        let urgentCount = 0;
+        let lowCount = 0;
+        let okCount = 0;
+        let nextStockout = Infinity;
+        let totalOrderQty = 0;
+        let totalOrderSpend = 0;
 
-      // ===== EXPLANATION =====
-      let reason = `Stockout in ${daysToStockout.toFixed(1)} days. Lead time ${lead} days. Safety buffer ${safetyDays} days.`;
+        let table = "<div class='table-wrap'><table><tr>";
 
-      // ===== COLOUR =====
-      let color = "white";
-      if (status === "URGENT") color = "#ef4444";
-      if (status === "LOW") color = "#f59e0b";
-      if (status === "OK") color = "#22c55e";
+        headers.forEach(h => {
+          table += `<th>${h}</th>`;
+        });
 
-      table += "<tr>";
+        table += `
+          <th>Forecast</th>
+          <th>Safety Stock</th>
+          <th>Reorder Point</th>
+          <th>Days to Stockout</th>
+          <th>Suggested Order Qty</th>
+          <th>Status</th>
+          <th>Reason</th>
+        </tr>`;
 
-      row.forEach(cell => table += `<td>${cell}</td>`);
+        let validRows = 0;
 
-      table += `
-        <td>${forecast.toFixed(0)}</td>
-        <td>${Math.ceil(safetyStock)}</td>
-        <td>${daysToStockout.toFixed(1)}</td>
-        <td>${Math.ceil(reorderQty)}</td>
-        <td style="color:${color}; font-weight:bold;">${status}</td>
-        <td style="text-align:left;">${reason}</td>
-      </tr>`;
-    });
+        data.forEach(row => {
+          if (row.length === 0 || row.every(cell => cell === "")) return;
 
-    table += "</table></div>";
+          const get = (name) => {
+            const idx = headers.indexOf(name);
+            return idx >= 0 ? row[idx] : "";
+          };
 
-    output += `
-      Urgent: ${urgentCount} | 
-      Low: ${lowCount} | 
-      Next stockout: ${nextStockout.toFixed(1)} days | 
-      Suggested order qty: ${totalOrder}
-    </div>`;
+          const sku = get("SKU");
+          const description = get("Description");
+          const stock = parseFloat(get("CurrentStock"));
+          const lead = parseFloat(get("LeadTimeDays"));
+          const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
+          const unitCost = parseFloat(get("UnitCost")) || 0;
+          const moq = parseFloat(get("MOQ")) || 0;
+          const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
 
-    document.getElementById("status").innerHTML = output + table;
-  };
+          if (!sku || !description || isNaN(stock) || isNaN(lead)) return;
 
-  reader.readAsText(file);
-}
-</script>
+          let forecast = 0;
+          let forecastMethod = "";
+
+          if (hasHistory) {
+            const m1 = parseFloat(get("M1")) || 0;
+            const m2 = parseFloat(get("M2")) || 0;
+            const m3 = parseFloat(get("M3")) || 0;
+            forecast = (m1 + m2 + m3) / 3;
+            forecastMethod = "3-month average";
+          } else {
+            forecast = parseFloat(get("MonthlyDemand"));
+            forecastMethod = "manual monthly demand";
+          }
+
+          if (isNaN(forecast) || forecast <= 0) return;
+
+          const daily = forecast / 30;
+
+          // MVP safety stock model
+          const safetyDays = 7;
+          let recommendedSafetyStock = daily * safetyDays;
+
+          // If uploaded SafetyStock exists, allow override later. For now just use calculated value if absent.
+          const uploadedSafety = parseFloat(get("SafetyStock"));
+          if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
+            recommendedSafetyStock = uploadedSafety;
+          }
+
+          const effectiveStock = stock + onOrderQty;
+          const reorderPoint = (daily * lead) + recommendedSafetyStock;
+          let reorderQty = Math.max(0, reorderPoint - effectiveStock);
+
+          if (moq > 0 && reorderQty > 0 && reorderQty < moq) {
+            reorderQty = moq;
+          }
+
+          reorderQty = roundUpToMultiple(reorderQty, orderMultiple);
+
+          const daysToStockout = effectiveStock / daily;
+
+          let status = "OK";
+          let color = "#22c55e";
+
+          if (daysToStockout < lead) {
+            status = "URGENT";
+            color = "#ef4444";
+            urgentCount++;
+          } else if (daysToStockout < lead + safetyDays) {
+            status = "LOW";
+            color = "#f59e0b";
+            lowCount++;
+          } else {
+            okCount++;
+          }
+
+          if (daysToStockout < nextStockout) {
+            nextStockout = daysToStockout;
+          }
+
+          totalOrderQty += Math.ceil(reorderQty);
+          totalOrderSpend += reorderQty * unitCost;
+
+          const reason =
+            `Forecast uses ${forecastMethod}. ` +
+            `Stock cover is ${daysToStockout.toFixed(1)} days. ` +
+            `Lead time is ${lead} days. ` +
+            `Recommended safety stock is ${Math.ceil(recommendedSafetyStock)} units.`;
+
+          table += "<tr>";
+
+          headers.forEach((header, idx) => {
+            table += `<td>${row[idx] ?? ""}</td>`;
+          });
+
+          table += `
+            <td>${forecast.toFixed(0)}</td>
+            <td>${Math.ceil(recommendedSafetyStock)}</td>
+            <td>${Math.ceil(reorderPoint)}</td>
+            <td>${daysToStockout.toFixed(1)}</td>
+            <td>${Math.ceil(reorderQty)}</td>
+            <td style="color:${color}; font-weight:bold;">${status}</td>
+            <td class="reason">${reason}</td>
+          </tr>`;
+
+          validRows++;
+        });
+
+        table += "</table></div>";
+
+        if (validRows === 0) {
+          document.getElementById("status").innerHTML =
+            "<p>No valid data rows were found. Check your column names and numeric values.</p>";
+          return;
+        }
+
+        const summaryHtml = `
+          <div class="summary-strip">
+            <div class="summary-card">
+              <h4>Urgent SKUs</h4>
+              <p>${urgentCount}</p>
+            </div>
+            <div class="summary-card">
+              <h4>Low Stock SKUs</h4>
+              <p>${lowCount}</p>
+            </div>
+            <div class="summary-card">
+              <h4>OK SKUs</h4>
+              <p>${okCount}</p>
+            </div>
+            <div class="summary-card">
+              <h4>Next Stockout</h4>
+              <p>${nextStockout === Infinity ? "-" : nextStockout.toFixed(1) + "d"}</p>
+            </div>
+            <div class="summary-card">
+              <h4>Suggested Order Qty</h4>
+              <p>${totalOrderQty}</p>
+            </div>
+            <div class="summary-card">
+              <h4>Suggested Spend</h4>
+              <p>£${totalOrderSpend.toFixed(2)}</p>
+            </div>
+          </div>
+          <p class="muted">CB1 Engine v1: explainable replenishment logic with forecast, safety stock, and action-ready outputs.</p>
+        `;
+
+        document.getElementById("status").innerHTML = summaryHtml + table;
+      };
+
+      reader.readAsText(file);
+    }
+  </script>
+
+</body>
+</html>
