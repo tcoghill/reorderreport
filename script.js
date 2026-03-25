@@ -50,24 +50,20 @@ function roundUpToMultiple(value, multiple) {
 }
 
 function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays) {
-  const labels = [];
-  const projectedStock = [];
-  const safetyLine = [];
-  const zeroLine = [];
+  const labels = ["Now"];
+  const projectedStock = [Number(effectiveStock.toFixed(1))];
+  const safetyLine = [Number(safetyStock.toFixed(1))];
+  const zeroLine = [0];
 
-  // Convert lead time days into monthly-style periods and double it
   const periods = Math.max(3, Math.ceil((leadTimeDays / 30) * 2));
 
   let currentStock = effectiveStock;
 
   for (let i = 1; i <= periods; i++) {
-    labels.push(`M${i}`);
     currentStock -= forecast;
 
-    // Floor charted stock at zero
-    const chartStock = Math.max(0, currentStock);
-
-    projectedStock.push(Number(chartStock.toFixed(1)));
+    labels.push(`M${i}`);
+    projectedStock.push(Number(Math.max(0, currentStock).toFixed(1)));
     safetyLine.push(Number(safetyStock.toFixed(1)));
     zeroLine.push(0);
   }
@@ -472,6 +468,7 @@ const html = `
       <tr><td>On Order Qty</td><td>${onOrderQty}</td></tr>
       <tr><td>Effective Stock</td><td>${effectiveStock}</td></tr>
       <tr><td>Lead Time Days</td><td>${lead}</td></tr>
+      <tr><td>Forecast</td><td>${forecast.toFixed(0)} per month</td></tr>
       <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
       <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
       <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
