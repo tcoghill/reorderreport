@@ -1,9 +1,9 @@
+let uploadedData = [];
+let uploadedHeaders = [];
+
 // =========================
 // Template Downloads
 // =========================
-
-let uploadedData = [];
-let uploadedHeaders = [];
 
 function downloadSimpleTemplate() {
   const csvContent =
@@ -26,14 +26,12 @@ B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
 function downloadCsv(content, fileName) {
   const blob = new Blob([content], { type: "text/csv" });
   const url = window.URL.createObjectURL(blob);
-
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-
   window.URL.revokeObjectURL(url);
 }
 
@@ -48,58 +46,6 @@ function parseCsvLine(line) {
 function roundUpToMultiple(value, multiple) {
   if (!multiple || multiple <= 1) return Math.ceil(value);
   return Math.ceil(value / multiple) * multiple;
-}
-
-function handleSearch() {
-  const query = document.getElementById("skuSearch").value.toLowerCase();
-
-  if (!uploadedData.length) return;
-
-  const skuIndex = uploadedHeaders.indexOf("SKU");
-
-  if (skuIndex === -1) return;
-
-  const matches = uploadedData.filter(row =>
-    row[skuIndex].toLowerCase().includes(query)
-  );
-
-  displaySearchResults(matches.slice(0, 10)); // limit results
-}
-
-function selectSKU(index) {
-  const row = uploadedData[index];
-  runSingleSKU(row);
-}
-
-function runSingleSKU(row) {
-  document.getElementById("status").innerHTML = `
-    <h2>CB1 View</h2>
-    <p>Selected SKU: ${row[uploadedHeaders.indexOf("SKU")]}</p>
-  `;
-}
-
-// =========================
-// Dynamic Messaging
-// =========================
-
-function displaySearchResults(results) {
-  let html = "<div class='table-wrap'><table><tr><th>SKU</th><th>Description</th></tr>";
-
-  const skuIndex = uploadedHeaders.indexOf("SKU");
-  const descIndex = uploadedHeaders.indexOf("Description");
-
-  results.forEach((row, i) => {
-    html += `
-      <tr onclick="selectSKU(${i})" style="cursor:pointer;">
-        <td>${row[skuIndex]}</td>
-        <td>${row[descIndex] || ""}</td>
-      </tr>
-    `;
-  });
-
-  html += "</table></div>";
-
-  document.getElementById("status").innerHTML = html;
 }
 
 function getDynamicMessage(urgent, low, total) {
@@ -145,28 +91,25 @@ function getDynamicMessage(urgent, low, total) {
 }
 
 // =========================
-// UI Actions
+// Upload / Reset
 // =========================
-
-function handleFileChange() {
-  document.getElementById("status").innerHTML =
-    "<p class='muted'>New file selected. Ready to generate a fresh report.</p>";
-}
 
 function resetTool() {
+  uploadedData = [];
+  uploadedHeaders = [];
   document.getElementById("fileInput").value = "";
-  document.getElementById("status").innerHTML = "";
+  document.getElementById("skuSearch").value = "";
+  document.getElementById("skuSearch").disabled = true;
+  document.getElementById("uploadStatus").innerHTML = "";
+  document.getElementById("resultsPanel").innerHTML = "Upload a file to begin.";
+  document.getElementById("cb1Panel").innerHTML = "Select an SKU to load the CB1 view.";
 }
-
-// =========================
-// Main Engine
-// =========================
 
 function handleUpload() {
   const file = document.getElementById("fileInput").files[0];
 
   if (!file) {
-    document.getElementById("status").innerHTML = "<p>Please upload a CSV file.</p>";
+    document.getElementById("uploadStatus").innerHTML = "Please upload a CSV file.";
     return;
   }
 
@@ -177,12 +120,9 @@ function handleUpload() {
     const rows = text.split(/\r?\n/).map(parseCsvLine);
 
     if (rows.length < 2) {
-      document.getElementById("status").innerHTML = "<p>The CSV looks empty.</p>";
+      document.getElementById("uploadStatus").innerHTML = "The CSV looks empty.";
       return;
     }
-
-    const headers = rows[0];
-    const data = rows.slice(1);
 
     const headers = rows[0];
     const data = rows.slice(1);
@@ -193,206 +133,227 @@ function handleUpload() {
 
     for (const col of requiredSimple) {
       if (!headers.includes(col)) {
-        document.getElementById("status").innerHTML = `<p>Missing required column: <strong>${col}</strong></p>`;
+        document.getElementById("uploadStatus").innerHTML = `Missing required column: ${col}`;
         return;
       }
     }
 
     if (!hasMonthlyDemand && !hasHistory) {
-      document.getElementById("status").innerHTML =
-        "<p>You need either <strong>MonthlyDemand</strong> or history columns <strong>M1, M2, M3</strong>.</p>";
+      document.getElementById("uploadStatus").innerHTML =
+        "You need either MonthlyDemand or history columns M1, M2, M3.";
       return;
     }
 
-    let urgentCount = 0;
-    let lowCount = 0;
-    let okCount = 0;
-    let nextStockout = Infinity;
-    let totalOrderQty = 0;
-    let totalOrderSpend = 0;
-    let hasSpendData = false;
+    uploadedHeaders = headers;
+    uploadedData = data.filter(row => row.length > 0 && row.some(cell => cell !== ""));
 
-    let table = "<div class='table-wrap'><table><tr>";
+    document.getElementById("skuSearch").disabled = false;
+    document.getElementById("uploadStatus").innerHTML =
+      `File loaded: ${uploadedData.length} SKU rows ready. Search to begin.`;
 
-    headers.forEach(h => {
-      table += `<th>${h}</th>`;
-    });
-
-    table += `
-      <th>Forecast</th>
-      <th>Safety Stock</th>
-      <th>Reorder Point</th>
-      <th>Days to Stockout</th>
-      <th>Suggested Order Qty</th>
-      <th>Status</th>
-      <th>Reason</th>
-    </tr>`;
-
-    let validRows = 0;
-
-    data.forEach(row => {
-      if (row.length === 0 || row.every(cell => cell === "")) return;
-
-      const get = (name) => {
-        const idx = headers.indexOf(name);
-        return idx >= 0 ? row[idx] : "";
-      };
-
-      const sku = get("SKU");
-      const description = get("Description");
-      const stock = parseFloat(get("CurrentStock"));
-      const lead = parseFloat(get("LeadTimeDays"));
-      const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
-      const rawUnitCost = parseFloat(get("UnitCost"));
-      const unitCost = isNaN(rawUnitCost) ? 0 : rawUnitCost;
-      const moq = parseFloat(get("MOQ")) || 0;
-      const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
-
-      if (!sku || !description || isNaN(stock) || isNaN(lead)) return;
-
-      let forecast = 0;
-      let forecastMethod = "";
-
-      if (hasHistory) {
-        const m1 = parseFloat(get("M1")) || 0;
-        const m2 = parseFloat(get("M2")) || 0;
-        const m3 = parseFloat(get("M3")) || 0;
-        forecast = (m1 + m2 + m3) / 3;
-        forecastMethod = "3-month average";
-      } else {
-        forecast = parseFloat(get("MonthlyDemand"));
-        forecastMethod = "manual monthly demand";
-      }
-
-      if (isNaN(forecast) || forecast <= 0) return;
-
-      const daily = forecast / 30;
-      const safetyDays = 7;
-
-      let recommendedSafetyStock = daily * safetyDays;
-      const uploadedSafety = parseFloat(get("SafetyStock"));
-
-      if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
-        recommendedSafetyStock = uploadedSafety;
-      }
-
-      const effectiveStock = stock + onOrderQty;
-      const reorderPoint = (daily * lead) + recommendedSafetyStock;
-      let reorderQty = Math.max(0, reorderPoint - effectiveStock);
-
-      if (moq > 0 && reorderQty > 0 && reorderQty < moq) {
-        reorderQty = moq;
-      }
-
-      reorderQty = roundUpToMultiple(reorderQty, orderMultiple);
-
-      const daysToStockout = effectiveStock / daily;
-
-      let status = "OK";
-      let color = "#22c55e";
-
-      if (daysToStockout < lead) {
-        status = "URGENT";
-        color = "#ef4444";
-        urgentCount++;
-      } else if (daysToStockout < lead + safetyDays) {
-        status = "LOW";
-        color = "#f59e0b";
-        lowCount++;
-      } else {
-        okCount++;
-      }
-
-      if (daysToStockout < nextStockout) {
-        nextStockout = daysToStockout;
-      }
-
-      totalOrderQty += Math.ceil(reorderQty);
-
-      if (!isNaN(rawUnitCost) && rawUnitCost > 0) {
-        totalOrderSpend += reorderQty * unitCost;
-        hasSpendData = true;
-      }
-
-      const reason =
-        `Forecast uses ${forecastMethod}. ` +
-        `Stock cover is ${daysToStockout.toFixed(1)} days. ` +
-        `Lead time is ${lead} days. ` +
-        `Recommended safety stock is ${Math.ceil(recommendedSafetyStock)} units.`;
-
-      table += "<tr>";
-
-      headers.forEach((header, idx) => {
-        table += `<td>${row[idx] ?? ""}</td>`;
-      });
-
-      table += `
-        <td>${forecast.toFixed(0)}</td>
-        <td>${Math.ceil(recommendedSafetyStock)}</td>
-        <td>${Math.ceil(reorderPoint)}</td>
-        <td>${daysToStockout.toFixed(1)}</td>
-        <td>${Math.ceil(reorderQty)}</td>
-        <td style="color:${color}; font-weight:bold;">${status}</td>
-        <td class="reason">${reason}</td>
-      </tr>`;
-
-      validRows++;
-    });
-
-    table += "</table></div>";
-
-    if (validRows === 0) {
-      document.getElementById("status").innerHTML =
-        "<p>No valid data rows were found. Check your column names and numeric values.</p>";
-      return;
-    }
-
-    let message = getDynamicMessage(urgentCount, lowCount, validRows);
-    let messageColor = "#22c55e";
-
-    if (urgentCount > 0) {
-      messageColor = "#ef4444";
-    } else if (lowCount > 0) {
-      messageColor = "#f59e0b";
-    }
-
-    const summaryHtml = `
-      <div class="summary-strip">
-        <div class="summary-card">
-          <h4>Urgent SKUs</h4>
-          <p>${urgentCount}</p>
-        </div>
-        <div class="summary-card">
-          <h4>Low Stock SKUs</h4>
-          <p>${lowCount}</p>
-        </div>
-        <div class="summary-card">
-          <h4>OK SKUs</h4>
-          <p>${okCount}</p>
-        </div>
-        <div class="summary-card">
-          <h4>Next Stockout</h4>
-          <p>${nextStockout === Infinity ? "-" : nextStockout.toFixed(1) + "d"}</p>
-        </div>
-        <div class="summary-card">
-          <h4>Suggested Order Qty</h4>
-          <p>${totalOrderQty}</p>
-        </div>
-        <div class="summary-card">
-          <h4>Estimated Reorder Spend</h4>
-          <p>${hasSpendData ? "£" + totalOrderSpend.toFixed(2) : "N/A"}</p>
-        </div>
-      </div>
-
-      <div class="signal-box" style="color:${messageColor}; border:1px solid ${messageColor};">
-        ${message}
-      </div>
-
-      <p class="muted">CB1 Engine v1: explainable replenishment logic with forecast, safety stock, and action-ready outputs.</p>
-    `;
-
-    document.getElementById("status").innerHTML = summaryHtml + table;
+    renderResultsTable(uploadedData.slice(0, 25));
+    document.getElementById("cb1Panel").innerHTML = "Select an SKU from the left to load the CB1 view.";
   };
 
   reader.readAsText(file);
+}
+
+// =========================
+// Search / Results
+// =========================
+
+function handleSearch() {
+  if (!uploadedData.length) return;
+
+  const query = document.getElementById("skuSearch").value.toLowerCase();
+  const skuIndex = uploadedHeaders.indexOf("SKU");
+  const descIndex = uploadedHeaders.indexOf("Description");
+
+  const matches = uploadedData.filter(row => {
+    const sku = (row[skuIndex] || "").toLowerCase();
+    const desc = (row[descIndex] || "").toLowerCase();
+    return sku.includes(query) || desc.includes(query);
+  });
+
+  renderResultsTable(matches.slice(0, 25));
+}
+
+function renderResultsTable(rows) {
+  const skuIndex = uploadedHeaders.indexOf("SKU");
+  const descIndex = uploadedHeaders.indexOf("Description");
+
+  if (!rows.length) {
+    document.getElementById("resultsPanel").innerHTML = "No matching SKUs found.";
+    return;
+  }
+
+  let html = "<div class='table-wrap'><table><tr><th>SKU</th><th>Description</th></tr>";
+
+  rows.forEach(row => {
+    const sku = row[skuIndex] || "";
+    const desc = row[descIndex] || "";
+    const safeRow = encodeURIComponent(JSON.stringify(row));
+
+    html += `
+      <tr class="result-row" onclick="selectSKU('${safeRow}')">
+        <td>${sku}</td>
+        <td>${desc}</td>
+      </tr>
+    `;
+  });
+
+  html += "</table></div>";
+  document.getElementById("resultsPanel").innerHTML = html;
+}
+
+function selectSKU(encodedRow) {
+  const row = JSON.parse(decodeURIComponent(encodedRow));
+  runSingleSKU(row);
+}
+
+// =========================
+// CB1 Single SKU View
+// =========================
+
+function runSingleSKU(row) {
+  const get = (name) => {
+    const idx = uploadedHeaders.indexOf(name);
+    return idx >= 0 ? row[idx] : "";
+  };
+
+  const sku = get("SKU");
+  const description = get("Description");
+  const stock = parseFloat(get("CurrentStock"));
+  const lead = parseFloat(get("LeadTimeDays"));
+  const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
+  const rawUnitCost = parseFloat(get("UnitCost"));
+  const unitCost = isNaN(rawUnitCost) ? 0 : rawUnitCost;
+  const moq = parseFloat(get("MOQ")) || 0;
+  const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
+
+  let forecast = 0;
+  let forecastMethod = "";
+
+  const hasHistory = uploadedHeaders.includes("M1") && uploadedHeaders.includes("M2") && uploadedHeaders.includes("M3");
+
+  if (hasHistory) {
+    const m1 = parseFloat(get("M1")) || 0;
+    const m2 = parseFloat(get("M2")) || 0;
+    const m3 = parseFloat(get("M3")) || 0;
+    forecast = (m1 + m2 + m3) / 3;
+    forecastMethod = "3-month average";
+  } else {
+    forecast = parseFloat(get("MonthlyDemand"));
+    forecastMethod = "manual monthly demand";
+  }
+
+  if (isNaN(stock) || isNaN(lead) || isNaN(forecast) || forecast <= 0) {
+    document.getElementById("cb1Panel").innerHTML = "This SKU does not have valid data.";
+    return;
+  }
+
+  const daily = forecast / 30;
+  const safetyDays = 7;
+
+  let recommendedSafetyStock = daily * safetyDays;
+  const uploadedSafety = parseFloat(get("SafetyStock"));
+  if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
+    recommendedSafetyStock = uploadedSafety;
+  }
+
+  const effectiveStock = stock + onOrderQty;
+  const reorderPoint = (daily * lead) + recommendedSafetyStock;
+  let reorderQty = Math.max(0, reorderPoint - effectiveStock);
+
+  if (moq > 0 && reorderQty > 0 && reorderQty < moq) {
+    reorderQty = moq;
+  }
+
+  reorderQty = roundUpToMultiple(reorderQty, orderMultiple);
+
+  let projectedStock = effectiveStock;
+  let day = 0;
+  let runoutDay = null;
+
+  while (projectedStock > 0 && day < 365) {
+    projectedStock -= daily;
+    day++;
+    if (projectedStock <= 0 && runoutDay === null) {
+      runoutDay = day;
+    }
+  }
+
+  const daysToStockout = runoutDay || 999;
+
+  let status = "OK";
+  let color = "#22c55e";
+
+  if (daysToStockout < lead) {
+    status = "URGENT";
+    color = "#ef4444";
+  } else if (daysToStockout < lead + safetyDays) {
+    status = "LOW";
+    color = "#f59e0b";
+  }
+
+  const message = getDynamicMessage(status === "URGENT" ? 1 : 0, status === "LOW" ? 1 : 0, 1);
+  const spend = unitCost > 0 ? "£" + (reorderQty * unitCost).toFixed(2) : "N/A";
+
+  const reason =
+    `You will run out in ${daysToStockout} days. ` +
+    `Lead time is ${lead} days. ` +
+    `Safety buffer is ${Math.ceil(recommendedSafetyStock)} units. ` +
+    `Forecast based on ${forecastMethod}.`;
+
+  const html = `
+    <h3>${sku} - ${description}</h3>
+
+    <div class="summary-strip">
+      <div class="summary-card">
+        <h4>Status</h4>
+        <p style="color:${color};">${status}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Forecast</h4>
+        <p>${forecast.toFixed(0)}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Days to Stockout</h4>
+        <p>${daysToStockout}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Suggested Order Qty</h4>
+        <p>${Math.ceil(reorderQty)}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Estimated Spend</h4>
+        <p>${spend}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Safety Stock</h4>
+        <p>${Math.ceil(recommendedSafetyStock)}</p>
+      </div>
+    </div>
+
+    <div class="signal-box" style="color:${color}; border:1px solid ${color};">
+      ${message}
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>Current Stock</td><td>${stock}</td></tr>
+        <tr><td>On Order Qty</td><td>${onOrderQty}</td></tr>
+        <tr><td>Effective Stock</td><td>${effectiveStock}</td></tr>
+        <tr><td>Lead Time Days</td><td>${lead}</td></tr>
+        <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
+        <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
+        <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
+        <tr><td>Order Multiple</td><td>${orderMultiple || "-"}</td></tr>
+        <tr><td class="reason">Reason</td><td class="reason">${reason}</td></tr>
+      </table>
+    </div>
+  `;
+
+  document.getElementById("cb1Panel").innerHTML = html;
 }
