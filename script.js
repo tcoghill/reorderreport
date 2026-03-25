@@ -49,18 +49,25 @@ function roundUpToMultiple(value, multiple) {
   return Math.ceil(value / multiple) * multiple;
 }
 
-function buildProjectionData(effectiveStock, forecast, safetyStock, periods = 12) {
+function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays) {
   const labels = [];
   const projectedStock = [];
   const safetyLine = [];
   const zeroLine = [];
+
+  // Convert lead time days into monthly-style periods and double it
+  const periods = Math.max(3, Math.ceil((leadTimeDays / 30) * 2));
 
   let currentStock = effectiveStock;
 
   for (let i = 1; i <= periods; i++) {
     labels.push(`M${i}`);
     currentStock -= forecast;
-    projectedStock.push(Number(currentStock.toFixed(1)));
+
+    // Floor charted stock at zero
+    const chartStock = Math.max(0, currentStock);
+
+    projectedStock.push(Number(chartStock.toFixed(1)));
     safetyLine.push(Number(safetyStock.toFixed(1)));
     zeroLine.push(0);
   }
@@ -397,21 +404,22 @@ function runSingleSKU(row) {
     `Safety buffer is ${Math.ceil(recommendedSafetyStock)} units. ` +
     `Forecast based on ${forecastMethod}.`;
 
-  const projectionData = buildProjectionData(effectiveStock, forecast, recommendedSafetyStock, 12);
+  const projectionData = buildProjectionData(effectiveStock, forecast, recommendedSafetyStock, lead);
 
 let safetyBreachMonth = projectionData.projectedStock.findIndex(v => v < recommendedSafetyStock);
 let zeroBreachMonth = projectionData.projectedStock.findIndex(v => v <= 0);
+const horizonLabel = `${projectionData.labels.length} month${projectionData.labels.length > 1 ? "s" : ""}`;
 
 const breachText = `
   ${
     safetyBreachMonth >= 0
       ? `Projected stock breaches safety stock in month ${safetyBreachMonth + 1}.`
-      : `Projected stock stays above safety stock for 12 months.`
+      : `Projected stock stays above safety stock across the ${horizonLabel} view.`
   }
   ${
     zeroBreachMonth >= 0
       ? `Stock reaches zero in month ${zeroBreachMonth + 1}.`
-      : `Stock does not hit zero within 12 months.`
+      : `Stock does not hit zero across the ${horizonLabel} view.`
   }
 `;
 
