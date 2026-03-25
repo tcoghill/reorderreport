@@ -1,122 +1,344 @@
-body {
-  font-family: Arial, sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
-  text-align: center;
-  padding: 50px;
-  margin: 0;
+// =========================
+// Template Downloads
+// =========================
+
+function downloadSimpleTemplate() {
+  const csvContent =
+`SKU,Description,CurrentStock,MonthlyDemand,LeadTimeDays
+A,Item A,100,300,10
+B,Item B,50,200,15`;
+
+  downloadCsv(csvContent, "cb1-simple-template.csv");
 }
 
-.box {
-  background: #1e293b;
-  padding: 30px;
-  border-radius: 10px;
-  max-width: 1100px;
-  margin: auto;
-  box-sizing: border-box;
+function downloadAdvancedTemplate() {
+  const csvContent =
+`SKU,Description,CurrentStock,LeadTimeDays,OnOrderQty,UnitCost,Supplier,MOQ,OrderMultiple,M1,M2,M3
+A,Item A,100,10,0,2.50,Supplier A,0,1,200,250,300
+B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
+
+  downloadCsv(csvContent, "cb1-advanced-template.csv");
 }
 
-input, button {
-  margin-top: 15px;
-  padding: 10px;
-  width: 100%;
-  border-radius: 5px;
-  border: none;
-  box-sizing: border-box;
+function downloadCsv(content, fileName) {
+  const blob = new Blob([content], { type: "text/csv" });
+  const url = window.URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  window.URL.revokeObjectURL(url);
 }
 
-button {
-  background: #22c55e;
-  color: black;
-  font-weight: bold;
-  cursor: pointer;
+// =========================
+// Helpers
+// =========================
+
+function parseCsvLine(line) {
+  return line.split(",").map(cell => cell.trim());
 }
 
-.secondary-btn {
-  background: #334155;
-  color: white;
+function roundUpToMultiple(value, multiple) {
+  if (!multiple || multiple <= 1) return Math.ceil(value);
+  return Math.ceil(value / multiple) * multiple;
 }
 
-.danger-btn {
-  background: #7f1d1d;
-  color: white;
+// =========================
+// Dynamic Messaging
+// =========================
+
+function getDynamicMessage(urgent, low, total) {
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  if (urgent === total && total > 0) {
+    return pick([
+      "Right. Let’s not pretend this is fine.",
+      "This is a mess.",
+      "We need to talk. Immediately.",
+      "You’ve achieved full chaos.",
+      "Let’s call this… a rebuild."
+    ]);
+  }
+
+  if (urgent > 0) {
+    return pick([
+      "Well… this is going to hurt.",
+      "Congratulations, you’re already late.",
+      "This won’t fix itself.",
+      "You’re about to run out. Not ideal.",
+      "Hope you like explaining stockouts."
+    ]);
+  }
+
+  if (low > 0) {
+    return pick([
+      "You’re playing a dangerous little game here.",
+      "This is fine… until it isn’t.",
+      "You’ve got time. Not loads.",
+      "One delay and this turns ugly.",
+      "Don’t leave this to chance."
+    ]);
+  }
+
+  return pick([
+    "Look at you, being organised.",
+    "No disasters today. Enjoy it.",
+    "Everything’s under control. Suspicious.",
+    "This is what competence looks like.",
+    "Carry on. Sensibly."
+  ]);
 }
 
-.summary-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-top: 20px;
-  text-align: left;
+// =========================
+// UI Actions
+// =========================
+
+function handleFileChange() {
+  document.getElementById("status").innerHTML =
+    "<p class='muted'>New file selected. Ready to generate a fresh report.</p>";
 }
 
-.summary-card {
-  background: #0f172a;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  padding: 14px;
+function resetTool() {
+  document.getElementById("fileInput").value = "";
+  document.getElementById("status").innerHTML = "";
 }
 
-.summary-card h4 {
-  margin: 0 0 8px 0;
-  font-size: 14px;
-  color: #94a3b8;
-  font-weight: normal;
-}
+// =========================
+// Main Engine
+// =========================
 
-.summary-card p {
-  margin: 0;
-  font-size: 24px;
-  font-weight: bold;
-  color: #e2e8f0;
-}
+function handleUpload() {
+  const file = document.getElementById("fileInput").files[0];
 
-.table-wrap {
-  width: 100%;
-  overflow-x: auto;
-  margin-top: 20px;
-}
+  if (!file) {
+    document.getElementById("status").innerHTML = "<p>Please upload a CSV file.</p>";
+    return;
+  }
 
-table {
-  width: 100%;
-  min-width: 1200px;
-  border-collapse: collapse;
-  color: white;
-}
+  const reader = new FileReader();
 
-th, td {
-  border: 1px solid #475569;
-  padding: 8px;
-  text-align: center;
-  vertical-align: top;
-}
+  reader.onload = function(event) {
+    const text = event.target.result.trim();
+    const rows = text.split(/\r?\n/).map(parseCsvLine);
 
-th {
-  background: #0f172a;
-  position: sticky;
-  top: 0;
-}
+    if (rows.length < 2) {
+      document.getElementById("status").innerHTML = "<p>The CSV looks empty.</p>";
+      return;
+    }
 
-td.reason {
-  text-align: left;
-  min-width: 260px;
-}
+    const headers = rows[0];
+    const data = rows.slice(1);
 
-#status {
-  margin-top: 20px;
-}
+    const requiredSimple = ["SKU", "Description", "CurrentStock", "LeadTimeDays"];
+    const hasMonthlyDemand = headers.includes("MonthlyDemand");
+    const hasHistory = headers.includes("M1") && headers.includes("M2") && headers.includes("M3");
 
-.muted {
-  color: #94a3b8;
-  font-size: 14px;
-  margin-top: 8px;
-}
+    for (const col of requiredSimple) {
+      if (!headers.includes(col)) {
+        document.getElementById("status").innerHTML = `<p>Missing required column: <strong>${col}</strong></p>`;
+        return;
+      }
+    }
 
-.signal-box {
-  margin-top: 20px;
-  padding: 15px;
-  border-radius: 8px;
-  font-size: 20px;
-  font-weight: bold;
-  background: rgba(255, 255, 255, 0.03);
+    if (!hasMonthlyDemand && !hasHistory) {
+      document.getElementById("status").innerHTML =
+        "<p>You need either <strong>MonthlyDemand</strong> or history columns <strong>M1, M2, M3</strong>.</p>";
+      return;
+    }
+
+    let urgentCount = 0;
+    let lowCount = 0;
+    let okCount = 0;
+    let nextStockout = Infinity;
+    let totalOrderQty = 0;
+    let totalOrderSpend = 0;
+    let hasSpendData = false;
+
+    let table = "<div class='table-wrap'><table><tr>";
+
+    headers.forEach(h => {
+      table += `<th>${h}</th>`;
+    });
+
+    table += `
+      <th>Forecast</th>
+      <th>Safety Stock</th>
+      <th>Reorder Point</th>
+      <th>Days to Stockout</th>
+      <th>Suggested Order Qty</th>
+      <th>Status</th>
+      <th>Reason</th>
+    </tr>`;
+
+    let validRows = 0;
+
+    data.forEach(row => {
+      if (row.length === 0 || row.every(cell => cell === "")) return;
+
+      const get = (name) => {
+        const idx = headers.indexOf(name);
+        return idx >= 0 ? row[idx] : "";
+      };
+
+      const sku = get("SKU");
+      const description = get("Description");
+      const stock = parseFloat(get("CurrentStock"));
+      const lead = parseFloat(get("LeadTimeDays"));
+      const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
+      const rawUnitCost = parseFloat(get("UnitCost"));
+      const unitCost = isNaN(rawUnitCost) ? 0 : rawUnitCost;
+      const moq = parseFloat(get("MOQ")) || 0;
+      const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
+
+      if (!sku || !description || isNaN(stock) || isNaN(lead)) return;
+
+      let forecast = 0;
+      let forecastMethod = "";
+
+      if (hasHistory) {
+        const m1 = parseFloat(get("M1")) || 0;
+        const m2 = parseFloat(get("M2")) || 0;
+        const m3 = parseFloat(get("M3")) || 0;
+        forecast = (m1 + m2 + m3) / 3;
+        forecastMethod = "3-month average";
+      } else {
+        forecast = parseFloat(get("MonthlyDemand"));
+        forecastMethod = "manual monthly demand";
+      }
+
+      if (isNaN(forecast) || forecast <= 0) return;
+
+      const daily = forecast / 30;
+      const safetyDays = 7;
+
+      let recommendedSafetyStock = daily * safetyDays;
+      const uploadedSafety = parseFloat(get("SafetyStock"));
+
+      if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
+        recommendedSafetyStock = uploadedSafety;
+      }
+
+      const effectiveStock = stock + onOrderQty;
+      const reorderPoint = (daily * lead) + recommendedSafetyStock;
+      let reorderQty = Math.max(0, reorderPoint - effectiveStock);
+
+      if (moq > 0 && reorderQty > 0 && reorderQty < moq) {
+        reorderQty = moq;
+      }
+
+      reorderQty = roundUpToMultiple(reorderQty, orderMultiple);
+
+      const daysToStockout = effectiveStock / daily;
+
+      let status = "OK";
+      let color = "#22c55e";
+
+      if (daysToStockout < lead) {
+        status = "URGENT";
+        color = "#ef4444";
+        urgentCount++;
+      } else if (daysToStockout < lead + safetyDays) {
+        status = "LOW";
+        color = "#f59e0b";
+        lowCount++;
+      } else {
+        okCount++;
+      }
+
+      if (daysToStockout < nextStockout) {
+        nextStockout = daysToStockout;
+      }
+
+      totalOrderQty += Math.ceil(reorderQty);
+
+      if (!isNaN(rawUnitCost) && rawUnitCost > 0) {
+        totalOrderSpend += reorderQty * unitCost;
+        hasSpendData = true;
+      }
+
+      const reason =
+        `Forecast uses ${forecastMethod}. ` +
+        `Stock cover is ${daysToStockout.toFixed(1)} days. ` +
+        `Lead time is ${lead} days. ` +
+        `Recommended safety stock is ${Math.ceil(recommendedSafetyStock)} units.`;
+
+      table += "<tr>";
+
+      headers.forEach((header, idx) => {
+        table += `<td>${row[idx] ?? ""}</td>`;
+      });
+
+      table += `
+        <td>${forecast.toFixed(0)}</td>
+        <td>${Math.ceil(recommendedSafetyStock)}</td>
+        <td>${Math.ceil(reorderPoint)}</td>
+        <td>${daysToStockout.toFixed(1)}</td>
+        <td>${Math.ceil(reorderQty)}</td>
+        <td style="color:${color}; font-weight:bold;">${status}</td>
+        <td class="reason">${reason}</td>
+      </tr>`;
+
+      validRows++;
+    });
+
+    table += "</table></div>";
+
+    if (validRows === 0) {
+      document.getElementById("status").innerHTML =
+        "<p>No valid data rows were found. Check your column names and numeric values.</p>";
+      return;
+    }
+
+    let message = getDynamicMessage(urgentCount, lowCount, validRows);
+    let messageColor = "#22c55e";
+
+    if (urgentCount > 0) {
+      messageColor = "#ef4444";
+    } else if (lowCount > 0) {
+      messageColor = "#f59e0b";
+    }
+
+    const summaryHtml = `
+      <div class="summary-strip">
+        <div class="summary-card">
+          <h4>Urgent SKUs</h4>
+          <p>${urgentCount}</p>
+        </div>
+        <div class="summary-card">
+          <h4>Low Stock SKUs</h4>
+          <p>${lowCount}</p>
+        </div>
+        <div class="summary-card">
+          <h4>OK SKUs</h4>
+          <p>${okCount}</p>
+        </div>
+        <div class="summary-card">
+          <h4>Next Stockout</h4>
+          <p>${nextStockout === Infinity ? "-" : nextStockout.toFixed(1) + "d"}</p>
+        </div>
+        <div class="summary-card">
+          <h4>Suggested Order Qty</h4>
+          <p>${totalOrderQty}</p>
+        </div>
+        <div class="summary-card">
+          <h4>Estimated Reorder Spend</h4>
+          <p>${hasSpendData ? "£" + totalOrderSpend.toFixed(2) : "N/A"}</p>
+        </div>
+      </div>
+
+      <div class="signal-box" style="color:${messageColor}; border:1px solid ${messageColor};">
+        ${message}
+      </div>
+
+      <p class="muted">CB1 Engine v1: explainable replenishment logic with forecast, safety stock, and action-ready outputs.</p>
+    `;
+
+    document.getElementById("status").innerHTML = summaryHtml + table;
+  };
+
+  reader.readAsText(file);
 }
