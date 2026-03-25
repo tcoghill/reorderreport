@@ -1,5 +1,6 @@
 let uploadedData = [];
 let uploadedHeaders = [];
+let cb1Chart = null;
 
 // =========================
 // Template Downloads
@@ -46,6 +47,97 @@ function parseCsvLine(line) {
 function roundUpToMultiple(value, multiple) {
   if (!multiple || multiple <= 1) return Math.ceil(value);
   return Math.ceil(value / multiple) * multiple;
+}
+
+function buildProjectionData(effectiveStock, forecast, safetyStock, periods = 12) {
+  const labels = [];
+  const projectedStock = [];
+  const safetyLine = [];
+  const zeroLine = [];
+
+  let currentStock = effectiveStock;
+
+  for (let i = 1; i <= periods; i++) {
+    labels.push(`M${i}`);
+    currentStock -= forecast;
+    projectedStock.push(Number(currentStock.toFixed(1)));
+    safetyLine.push(Number(safetyStock.toFixed(1)));
+    zeroLine.push(0);
+  }
+
+  return { labels, projectedStock, safetyLine, zeroLine };
+}
+
+function renderProjectionChart(canvasId, projectionData) {
+  const ctx = document.getElementById(canvasId);
+
+  if (!ctx) return;
+
+  if (cb1Chart) {
+    cb1Chart.destroy();
+  }
+
+  cb1Chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: projectionData.labels,
+      datasets: [
+        {
+          label: "Projected Stock",
+          data: projectionData.projectedStock,
+          borderColor: "#60a5fa",
+          backgroundColor: "rgba(96,165,250,0.12)",
+          tension: 0.2,
+          fill: false
+        },
+        {
+          label: "Safety Stock",
+          data: projectionData.safetyLine,
+          borderColor: "#f59e0b",
+          borderDash: [6, 6],
+          tension: 0,
+          fill: false
+        },
+        {
+          label: "Zero",
+          data: projectionData.zeroLine,
+          borderColor: "#ef4444",
+          borderDash: [6, 6],
+          tension: 0,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            color: "#e2e8f0"
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: "#e2e8f0"
+          },
+          grid: {
+            color: "rgba(255,255,255,0.08)"
+          }
+        },
+        y: {
+          ticks: {
+            color: "#e2e8f0"
+          },
+          grid: {
+            color: "rgba(255,255,255,0.08)"
+          }
+        }
+      }
+    }
+  });
 }
 
 function getDynamicMessage(urgent, low, total) {
@@ -305,55 +397,82 @@ function runSingleSKU(row) {
     `Safety buffer is ${Math.ceil(recommendedSafetyStock)} units. ` +
     `Forecast based on ${forecastMethod}.`;
 
-  const html = `
-    <h3>${sku} - ${description}</h3>
+  const projectionData = buildProjectionData(effectiveStock, forecast, recommendedSafetyStock, 12);
 
-    <div class="summary-strip">
-      <div class="summary-card">
-        <h4>Status</h4>
-        <p style="color:${color};">${status}</p>
-      </div>
-      <div class="summary-card">
-        <h4>Forecast</h4>
-        <p>${forecast.toFixed(0)}</p>
-      </div>
-      <div class="summary-card">
-        <h4>Days to Stockout</h4>
-        <p>${daysToStockout}</p>
-      </div>
-      <div class="summary-card">
-        <h4>Suggested Order Qty</h4>
-        <p>${Math.ceil(reorderQty)}</p>
-      </div>
-      <div class="summary-card">
-        <h4>Estimated Spend</h4>
-        <p>${spend}</p>
-      </div>
-      <div class="summary-card">
-        <h4>Safety Stock</h4>
-        <p>${Math.ceil(recommendedSafetyStock)}</p>
-      </div>
+let safetyBreachMonth = projectionData.projectedStock.findIndex(v => v < recommendedSafetyStock);
+let zeroBreachMonth = projectionData.projectedStock.findIndex(v => v <= 0);
+
+const breachText = `
+  ${
+    safetyBreachMonth >= 0
+      ? `Projected stock breaches safety stock in month ${safetyBreachMonth + 1}.`
+      : `Projected stock stays above safety stock for 12 months.`
+  }
+  ${
+    zeroBreachMonth >= 0
+      ? `Stock reaches zero in month ${zeroBreachMonth + 1}.`
+      : `Stock does not hit zero within 12 months.`
+  }
+`;
+
+const html = `
+  <h3>${sku} - ${description}</h3>
+
+  <div class="summary-strip">
+    <div class="summary-card">
+      <h4>Status</h4>
+      <p style="color:${color};">${status}</p>
     </div>
-
-    <div class="signal-box" style="color:${color}; border:1px solid ${color};">
-      ${message}
+    <div class="summary-card">
+      <h4>Forecast</h4>
+      <p>${forecast.toFixed(0)}</p>
     </div>
-
-    <div class="table-wrap">
-      <table>
-        <tr><th>Metric</th><th>Value</th></tr>
-        <tr><td>Current Stock</td><td>${stock}</td></tr>
-        <tr><td>On Order Qty</td><td>${onOrderQty}</td></tr>
-        <tr><td>Effective Stock</td><td>${effectiveStock}</td></tr>
-        <tr><td>Lead Time Days</td><td>${lead}</td></tr>
-        <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
-        <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
-        <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
-        <tr><td>Order Multiple</td><td>${orderMultiple || "-"}</td></tr>
-        <tr><td class="reason">Reason</td><td class="reason">${reason}</td></tr>
-      </table>
+    <div class="summary-card">
+      <h4>Days to Stockout</h4>
+      <p>${daysToStockout}</p>
     </div>
-  `;
+    <div class="summary-card">
+      <h4>Suggested Order Qty</h4>
+      <p>${Math.ceil(reorderQty)}</p>
+    </div>
+    <div class="summary-card">
+      <h4>Estimated Spend</h4>
+      <p>${spend}</p>
+    </div>
+    <div class="summary-card">
+      <h4>Safety Stock</h4>
+      <p>${Math.ceil(recommendedSafetyStock)}</p>
+    </div>
+  </div>
 
-  document.getElementById("cb1Panel").innerHTML = html;
+  <div class="signal-box" style="color:${color}; border:1px solid ${color};">
+    ${message}
+  </div>
+
+  <div class="panel" style="margin-top:15px;">
+    <h3 style="margin-top:0;">Projection</h3>
+    <div style="height:320px;">
+      <canvas id="projectionChart"></canvas>
+    </div>
+    <p class="muted">${breachText}</p>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Metric</th><th>Value</th></tr>
+      <tr><td>Current Stock</td><td>${stock}</td></tr>
+      <tr><td>On Order Qty</td><td>${onOrderQty}</td></tr>
+      <tr><td>Effective Stock</td><td>${effectiveStock}</td></tr>
+      <tr><td>Lead Time Days</td><td>${lead}</td></tr>
+      <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
+      <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
+      <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
+      <tr><td>Order Multiple</td><td>${orderMultiple || "-"}</td></tr>
+      <tr><td class="reason">Reason</td><td class="reason">${reason}</td></tr>
+    </table>
+  </div>
+`;
+
+document.getElementById("cb1Panel").innerHTML = html;
+renderProjectionChart("projectionChart", projectionData);
 }
