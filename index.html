@@ -258,6 +258,7 @@ B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
         let nextStockout = Infinity;
         let totalOrderQty = 0;
         let totalOrderSpend = 0;
+        let hasSpendData = false;
 
         let table = "<div class='table-wrap'><table><tr>";
 
@@ -290,7 +291,8 @@ B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
           const stock = parseFloat(get("CurrentStock"));
           const lead = parseFloat(get("LeadTimeDays"));
           const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
-          const unitCost = parseFloat(get("UnitCost")) || 0;
+          const rawUnitCost = parseFloat(get("UnitCost"));
+          const unitCost = isNaN(rawUnitCost) ? 0 : rawUnitCost;
           const moq = parseFloat(get("MOQ")) || 0;
           const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
 
@@ -356,7 +358,10 @@ B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
           }
 
           totalOrderQty += Math.ceil(reorderQty);
-          totalOrderSpend += reorderQty * unitCost;
+          if (!isNaN(rawUnitCost) && rawUnitCost > 0) {
+            totalOrderSpend += reorderQty * unitCost;
+            hasSpendData = true;
+          }
 
           const reason =
             `Forecast uses ${forecastMethod}. ` +
@@ -416,7 +421,7 @@ B,Item B,50,15,20,4.20,Supplier B,50,10,150,200,250`;
             </div>
             <div class="summary-card">
               <h4>Suggested Spend</h4>
-              <p>£${totalOrderSpend.toFixed(2)}</p>
+              <p>${hasSpendData ? "£" + totalOrderSpend.toFixed(2) : "N/A"}</p>
             </div>
           </div>
          <p class="muted" style="font-size:16px; margin-top:10px;">
