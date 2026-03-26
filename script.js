@@ -57,42 +57,48 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
   const zeroLine = [0];
   const replenishmentMarkers = [null];
 
-  const periods = Math.max(3, Math.ceil((leadTimeDays / 30) * 2));
-  const leadTimePeriods = Math.max(1, Math.ceil(leadTimeDays / 30));
-  const reorderPoint = forecast * (leadTimeDays / 30) + safetyStock;
+  const dailyDemand = forecast / 30;
+  const totalDays = Math.max(30, leadTimeDays * 2);
+
+  const reorderPoint = (dailyDemand * leadTimeDays) + safetyStock;
 
   let noActionStock = effectiveStock;
   let guidedCurrentStock = effectiveStock;
   let pendingDeliveries = [];
 
-  for (let i = 1; i <= periods; i++) {
-    labels.push(`M${i}`);
+  for (let day = 1; day <= totalDays; day++) {
+    labels.push(`D${day}`);
 
-    // No-action line
-    noActionStock -= forecast;
+    // No action scenario
+    noActionStock -= dailyDemand;
     projectedStock.push(Number(Math.max(0, noActionStock).toFixed(1)));
 
-    // Guided line
+    // Guided replenishment scenario
     let deliveryArriving = 0;
 
-    pendingDeliveries = pendingDeliveries.map(delivery => {
-      if (delivery.period === i) {
+    pendingDeliveries = pendingDeliveries.filter(delivery => {
+      if (delivery.day === day) {
         deliveryArriving += delivery.qty;
+        return false;
       }
-      return delivery;
-    }).filter(delivery => delivery.period !== i);
+      return true;
+    });
 
     guidedCurrentStock += deliveryArriving;
-    guidedCurrentStock -= forecast;
+    guidedCurrentStock -= dailyDemand;
 
-    // If stock is at/below reorder point, schedule replenishment
     let markerValue = null;
+
     if (guidedCurrentStock <= reorderPoint) {
-      pendingDeliveries.push({
-        period: i + leadTimePeriods,
-        qty: reorderQty
-      });
-      markerValue = Math.max(0, guidedCurrentStock);
+      const alreadyScheduled = pendingDeliveries.some(delivery => delivery.day === day + leadTimeDays);
+
+      if (!alreadyScheduled) {
+        pendingDeliveries.push({
+          day: day + leadTimeDays,
+          qty: reorderQty
+        });
+        markerValue = Math.max(0, guidedCurrentStock);
+      }
     }
 
     guidedStock.push(Number(Math.max(0, guidedCurrentStock).toFixed(1)));
@@ -180,14 +186,16 @@ function renderProjectionChart(canvasId, projectionData) {
         }
       },
       scales: {
-        x: {
-          ticks: {
-            color: "#e2e8f0"
-          },
-          grid: {
-            color: "rgba(255,255,255,0.08)"
-          }
+       x: {
+        ticks: {
+          color: "#e2e8f0",
+          autoSkip: true,
+          maxTicksLimit: 12
         },
+        grid: {
+          color: "rgba(255,255,255,0.08)"
+        }
+      },
         y: {
           beginAtZero: true,
           ticks: {
@@ -467,19 +475,19 @@ function runSingleSKU(row) {
   Math.ceil(reorderQty)
 );
 
-let safetyBreachMonth = projectionData.projectedStock.findIndex(v => v < recommendedSafetyStock);
-let zeroBreachMonth = projectionData.projectedStock.findIndex(v => v <= 0);
-const horizonLabel = `${projectionData.labels.length} month${projectionData.labels.length > 1 ? "s" : ""}`;
+let safetyBreachDay = projectionData.projectedStock.findIndex((v, i) => i > 0 && v < recommendedSafetyStock);
+let zeroBreachDay = projectionData.projectedStock.findIndex((v, i) => i > 0 && v <= 0);
+const horizonLabel = `${projectionData.labels.length - 1} day${projectionData.labels.length - 1 > 1 ? "s" : ""}`;
 
 const breachText = `
   ${
-    safetyBreachMonth >= 0
-      ? `Without action, stock breaches safety stock in month ${safetyBreachMonth + 1}.`
+    safetyBreachDay >= 0
+      ? `Without action, stock breaches safety stock on day ${safetyBreachDay}.`
       : `Without action, stock stays above safety stock across the ${horizonLabel} view.`
   }
   ${
-    zeroBreachMonth >= 0
-      ? `Without action, stock reaches zero in month ${zeroBreachMonth + 1}.`
+    zeroBreachDay >= 0
+      ? `Without action, stock reaches zero on day ${zeroBreachDay}.`
       : `Without action, stock does not hit zero across the ${horizonLabel} view.`
   }
   The dashed green line shows guided replenishment based on CB1’s suggested order quantity and lead time assumptions.
