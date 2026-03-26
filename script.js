@@ -49,26 +49,67 @@ function roundUpToMultiple(value, multiple) {
   return Math.ceil(value / multiple) * multiple;
 }
 
-function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays) {
+function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays, reorderQty) {
   const labels = ["Now"];
   const projectedStock = [Number(effectiveStock.toFixed(1))];
+  const guidedStock = [Number(effectiveStock.toFixed(1))];
   const safetyLine = [Number(safetyStock.toFixed(1))];
   const zeroLine = [0];
+  const replenishmentMarkers = [null];
 
   const periods = Math.max(3, Math.ceil((leadTimeDays / 30) * 2));
+  const leadTimePeriods = Math.max(1, Math.ceil(leadTimeDays / 30));
+  const reorderPoint = forecast * (leadTimeDays / 30) + safetyStock;
 
-  let currentStock = effectiveStock;
+  let noActionStock = effectiveStock;
+  let guidedCurrentStock = effectiveStock;
+  let pendingDeliveries = [];
 
   for (let i = 1; i <= periods; i++) {
-    currentStock -= forecast;
-
     labels.push(`M${i}`);
-    projectedStock.push(Number(Math.max(0, currentStock).toFixed(1)));
+
+    // No-action line
+    noActionStock -= forecast;
+    projectedStock.push(Number(Math.max(0, noActionStock).toFixed(1)));
+
+    // Guided line
+    let deliveryArriving = 0;
+
+    pendingDeliveries = pendingDeliveries.map(delivery => {
+      if (delivery.period === i) {
+        deliveryArriving += delivery.qty;
+      }
+      return delivery;
+    }).filter(delivery => delivery.period !== i);
+
+    guidedCurrentStock += deliveryArriving;
+    guidedCurrentStock -= forecast;
+
+    // If stock is at/below reorder point, schedule replenishment
+    let markerValue = null;
+    if (guidedCurrentStock <= reorderPoint) {
+      pendingDeliveries.push({
+        period: i + leadTimePeriods,
+        qty: reorderQty
+      });
+      markerValue = Math.max(0, guidedCurrentStock);
+    }
+
+    guidedStock.push(Number(Math.max(0, guidedCurrentStock).toFixed(1)));
+    replenishmentMarkers.push(markerValue !== null ? Number(markerValue.toFixed(1)) : null);
+
     safetyLine.push(Number(safetyStock.toFixed(1)));
     zeroLine.push(0);
   }
 
-  return { labels, projectedStock, safetyLine, zeroLine };
+  return {
+    labels,
+    projectedStock,
+    guidedStock,
+    safetyLine,
+    zeroLine,
+    replenishmentMarkers
+  };
 }
 
 function renderProjectionChart(canvasId, projectionData) {
@@ -86,12 +127,29 @@ function renderProjectionChart(canvasId, projectionData) {
       labels: projectionData.labels,
       datasets: [
         {
-          label: "Projected Stock",
+          label: "Projected Stock (No Action)",
           data: projectionData.projectedStock,
           borderColor: "#60a5fa",
           backgroundColor: "rgba(96,165,250,0.12)",
           tension: 0.2,
           fill: false
+        },
+        {
+          label: "Projected Stock (Guided Replenishment)",
+          data: projectionData.guidedStock,
+          borderColor: "#22c55e",
+          borderDash: [8, 6],
+          tension: 0.2,
+          fill: false
+        },
+        {
+          label: "Suggested Replenishment Trigger",
+          data: projectionData.replenishmentMarkers,
+          borderColor: "#22c55e",
+          backgroundColor: "#22c55e",
+          pointRadius: 5,
+          pointHoverRadius: 6,
+          showLine: false
         },
         {
           label: "Safety Stock",
@@ -131,6 +189,7 @@ function renderProjectionChart(canvasId, projectionData) {
           }
         },
         y: {
+          beginAtZero: true,
           ticks: {
             color: "#e2e8f0"
           },
@@ -400,7 +459,13 @@ function runSingleSKU(row) {
     `Safety buffer is ${Math.ceil(recommendedSafetyStock)} units. ` +
     `Forecast based on ${forecastMethod}.`;
 
-  const projectionData = buildProjectionData(effectiveStock, forecast, recommendedSafetyStock, lead);
+  const projectionData = buildProjectionData(
+  effectiveStock,
+  forecast,
+  recommendedSafetyStock,
+  lead,
+  Math.ceil(reorderQty)
+);
 
 let safetyBreachMonth = projectionData.projectedStock.findIndex(v => v < recommendedSafetyStock);
 let zeroBreachMonth = projectionData.projectedStock.findIndex(v => v <= 0);
@@ -409,14 +474,15 @@ const horizonLabel = `${projectionData.labels.length} month${projectionData.labe
 const breachText = `
   ${
     safetyBreachMonth >= 0
-      ? `Projected stock breaches safety stock in month ${safetyBreachMonth + 1}.`
-      : `Projected stock stays above safety stock across the ${horizonLabel} view.`
+      ? `Without action, stock breaches safety stock in month ${safetyBreachMonth + 1}.`
+      : `Without action, stock stays above safety stock across the ${horizonLabel} view.`
   }
   ${
     zeroBreachMonth >= 0
-      ? `Stock reaches zero in month ${zeroBreachMonth + 1}.`
-      : `Stock does not hit zero across the ${horizonLabel} view.`
+      ? `Without action, stock reaches zero in month ${zeroBreachMonth + 1}.`
+      : `Without action, stock does not hit zero across the ${horizonLabel} view.`
   }
+  The dashed green line shows guided replenishment based on CB1’s suggested order quantity and lead time assumptions.
 `;
 
 const html = `
