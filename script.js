@@ -49,7 +49,19 @@ function roundUpToMultiple(value, multiple) {
   return Math.ceil(value / multiple) * multiple;
 }
 
-function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays, reorderQty) {
+function calculateTopUpOrderQty(currentStockPosition, maxStockLevel, moq, orderMultiple) {
+  const minOrder = moq > 0 ? moq : 1;
+  let orderQty = Math.max(0, maxStockLevel - currentStockPosition);
+
+  if (orderQty > 0) {
+    orderQty = Math.max(orderQty, minOrder);
+    orderQty = roundUpToMultiple(orderQty, orderMultiple || 1);
+  }
+
+  return Math.ceil(orderQty);
+}
+
+function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays, moq, orderMultiple) {
   const labels = ["Now"];
   const projectedStock = [Number(effectiveStock.toFixed(1))];
   const guidedStock = [Number(effectiveStock.toFixed(1))];
@@ -61,44 +73,43 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
   const totalDays = Math.max(30, leadTimeDays * 2);
 
   const reorderPoint = (dailyDemand * leadTimeDays) + safetyStock;
+  const maxStockLevel = reorderPoint + forecast;
 
   let noActionStock = effectiveStock;
   let guidedCurrentStock = effectiveStock;
-  let pendingDeliveries = [];
+  let pendingDelivery = null;
 
   for (let day = 1; day <= totalDays; day++) {
     labels.push(`D${day}`);
 
-    // No action scenario
+    // No action line
     noActionStock -= dailyDemand;
     projectedStock.push(Number(Math.max(0, noActionStock).toFixed(1)));
 
-    // Guided replenishment scenario
-    let deliveryArriving = 0;
+    // Guided replenishment line
+    if (pendingDelivery && pendingDelivery.day === day) {
+      guidedCurrentStock += pendingDelivery.qty;
+      pendingDelivery = null;
+    }
 
-    pendingDeliveries = pendingDeliveries.filter(delivery => {
-      if (delivery.day === day) {
-        deliveryArriving += delivery.qty;
-        return false;
-      }
-      return true;
-    });
-
-    guidedCurrentStock += deliveryArriving;
     guidedCurrentStock -= dailyDemand;
 
     let markerValue = null;
 
-    if (guidedCurrentStock <= reorderPoint) {
-      const alreadyScheduled = pendingDeliveries.some(delivery => delivery.day === day + leadTimeDays);
+    if (guidedCurrentStock <= reorderPoint && !pendingDelivery) {
+      const orderQty = calculateTopUpOrderQty(
+        guidedCurrentStock,
+        maxStockLevel,
+        moq,
+        orderMultiple
+      );
 
-      if (!alreadyScheduled) {
-        pendingDeliveries.push({
-          day: day + leadTimeDays,
-          qty: reorderQty
-        });
-        markerValue = Math.max(0, guidedCurrentStock);
-      }
+      pendingDelivery = {
+        day: day + leadTimeDays,
+        qty: orderQty
+      };
+
+      markerValue = Math.max(0, guidedCurrentStock);
     }
 
     guidedStock.push(Number(Math.max(0, guidedCurrentStock).toFixed(1)));
@@ -114,7 +125,9 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
     guidedStock,
     safetyLine,
     zeroLine,
-    replenishmentMarkers
+    replenishmentMarkers,
+    reorderPoint: Number(reorderPoint.toFixed(1)),
+    maxStockLevel: Number(maxStockLevel.toFixed(1))
   };
 }
 
@@ -425,13 +438,14 @@ function runSingleSKU(row) {
 
   const effectiveStock = stock + onOrderQty;
   const reorderPoint = (daily * lead) + recommendedSafetyStock;
-  let reorderQty = Math.max(0, reorderPoint - effectiveStock);
-
-  if (moq > 0 && reorderQty > 0 && reorderQty < moq) {
-    reorderQty = moq;
-  }
-
-  reorderQty = roundUpToMultiple(reorderQty, orderMultiple);
+  const maxStockLevel = reorderPoint + forecast;
+  
+  let reorderQty = calculateTopUpOrderQty(
+    effectiveStock,
+    maxStockLevel,
+    moq,
+    orderMultiple
+  );
 
   let projectedStock = effectiveStock;
   let day = 0;
@@ -465,6 +479,7 @@ function runSingleSKU(row) {
     `You will run out in ${daysToStockout} days. ` +
     `Lead time is ${lead} days. ` +
     `Safety buffer is ${Math.ceil(recommendedSafetyStock)} units. ` +
+    `CB1 recommends topping stock back up toward ${Math.ceil(maxStockLevel)} units. ` +
     `Forecast based on ${forecastMethod}.`;
 
   const projectionData = buildProjectionData(
@@ -472,7 +487,8 @@ function runSingleSKU(row) {
   forecast,
   recommendedSafetyStock,
   lead,
-  Math.ceil(reorderQty)
+  moq,
+  orderMultiple
 );
 
 let safetyBreachDay = projectionData.projectedStock.findIndex((v, i) => i > 0 && v < recommendedSafetyStock);
@@ -490,7 +506,7 @@ const breachText = `
       ? `Without action, stock reaches zero on day ${zeroBreachDay}.`
       : `Without action, stock does not hit zero across the ${horizonLabel} view.`
   }
-  The dashed green line shows guided replenishment based on CB1’s suggested order quantity and lead time assumptions.
+  The dashed green line shows guided replenishment using CB1’s min/max logic, topping stock back up toward the target max level after lead time.
 `;
 
 const html = `
@@ -545,6 +561,7 @@ const html = `
       <tr><td>Forecast</td><td>${forecast.toFixed(0)} per month</td></tr>
       <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
       <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
+      <tr><td>Max Stock Level</td><td>${Math.ceil(maxStockLevel)}</td></tr>
       <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
       <tr><td>Order Multiple</td><td>${orderMultiple || "-"}</td></tr>
       <tr><td class="reason">Reason</td><td class="reason">${reason}</td></tr>
