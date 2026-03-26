@@ -66,7 +66,6 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
   const projectedStock = [Number(effectiveStock.toFixed(1))];
   const guidedStock = [Number(effectiveStock.toFixed(1))];
   const safetyLine = [Number(safetyStock.toFixed(1))];
-  const zeroLine = [0];
   const replenishmentMarkers = [null];
 
   const dailyDemand = forecast / 30;
@@ -74,6 +73,7 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
 
   const reorderPoint = (dailyDemand * leadTimeDays) + safetyStock;
   const maxStockLevel = reorderPoint + forecast;
+  const maxLine = [Number(maxStockLevel.toFixed(1))];
 
   let noActionStock = effectiveStock;
   let guidedCurrentStock = effectiveStock;
@@ -82,20 +82,22 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
   for (let day = 1; day <= totalDays; day++) {
     labels.push(`D${day}`);
 
-    // No action line
+    // No action projection
     noActionStock -= dailyDemand;
     projectedStock.push(Number(Math.max(0, noActionStock).toFixed(1)));
 
-    // Guided replenishment line
+    // Receive pending delivery if due
     if (pendingDelivery && pendingDelivery.day === day) {
       guidedCurrentStock += pendingDelivery.qty;
       pendingDelivery = null;
     }
 
+    // Consume daily demand
     guidedCurrentStock -= dailyDemand;
 
     let markerValue = null;
 
+    // Trigger replenishment when stock breaches reorder point
     if (guidedCurrentStock <= reorderPoint && !pendingDelivery) {
       const orderQty = calculateTopUpOrderQty(
         guidedCurrentStock,
@@ -114,9 +116,8 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
 
     guidedStock.push(Number(Math.max(0, guidedCurrentStock).toFixed(1)));
     replenishmentMarkers.push(markerValue !== null ? Number(markerValue.toFixed(1)) : null);
-
     safetyLine.push(Number(safetyStock.toFixed(1)));
-    zeroLine.push(0);
+    maxLine.push(Number(maxStockLevel.toFixed(1)));
   }
 
   return {
@@ -124,7 +125,7 @@ function buildProjectionData(effectiveStock, forecast, safetyStock, leadTimeDays
     projectedStock,
     guidedStock,
     safetyLine,
-    zeroLine,
+    maxLine,
     replenishmentMarkers,
     reorderPoint: Number(reorderPoint.toFixed(1)),
     maxStockLevel: Number(maxStockLevel.toFixed(1))
@@ -171,17 +172,17 @@ function renderProjectionChart(canvasId, projectionData) {
           showLine: false
         },
         {
-          label: "Safety Stock",
+          label: "Safety Stock (Min)",
           data: projectionData.safetyLine,
-          borderColor: "#f59e0b",
+          borderColor: "#ef4444",
           borderDash: [6, 6],
           tension: 0,
           fill: false
         },
         {
-          label: "Zero",
-          data: projectionData.zeroLine,
-          borderColor: "#ef4444",
+          label: "Max Stock Level",
+          data: projectionData.maxLine,
+          borderColor: "#f59e0b",
           borderDash: [6, 6],
           tension: 0,
           fill: false
