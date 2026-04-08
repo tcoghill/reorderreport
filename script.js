@@ -284,11 +284,13 @@ function resetTool() {
 
   const fileInput = document.getElementById("fileInput");
   const uploadStatus = document.getElementById("uploadStatus");
+  const fileSummaryPanel = document.getElementById("fileSummaryPanel");
   const goldOverviewPanel = document.getElementById("goldOverviewPanel");
   const cb1Panel = document.getElementById("cb1Panel");
 
   if (fileInput) fileInput.value = "";
   if (uploadStatus) uploadStatus.innerHTML = "";
+  if (fileSummaryPanel) fileSummaryPanel.innerHTML = "Upload a file to see summary metadata.";
   if (goldOverviewPanel) goldOverviewPanel.innerHTML = "Upload a file to generate the overview.";
   if (cb1Panel) cb1Panel.innerHTML = "Select a SKU to load the CB1 view.";
 }
@@ -338,6 +340,7 @@ function handleUpload() {
     document.getElementById("uploadStatus").innerHTML =
       `File loaded: ${uploadedData.length} SKU rows ready. Gold Overview generated.`;
 
+    renderFileSummary();
     renderGoldOverview();
     document.getElementById("cb1Panel").innerHTML = "Select a SKU from the Gold Overview table to load the CB1 view.";
   };
@@ -443,6 +446,81 @@ function calculateOverviewMetrics(row) {
     color,
     estimatedSpend: unitCost > 0 ? suggestedOrderQty * unitCost : null
   };
+}
+
+function renderFileSummary() {
+  const fileSummaryPanel = document.getElementById("fileSummaryPanel");
+  if (!fileSummaryPanel) return;
+
+  if (!uploadedData.length || !uploadedHeaders.length) {
+    fileSummaryPanel.innerHTML = "Upload a file to see summary metadata.";
+    return;
+  }
+
+  const validRows = uploadedData
+    .map(calculateOverviewMetrics)
+    .filter(row => row !== null);
+
+  const invalidRowCount = uploadedData.length - validRows.length;
+
+  const urgentCount = validRows.filter(x => x.status === "URGENT").length;
+  const lowCount = validRows.filter(x => x.status === "LOW").length;
+  const okCount = validRows.filter(x => x.status === "OK").length;
+
+  const hasMonthlyDemandColumn = uploadedHeaders.includes("MonthlyDemand");
+  const hasHistoryColumns =
+    uploadedHeaders.includes("M1") &&
+    uploadedHeaders.includes("M2") &&
+    uploadedHeaders.includes("M3");
+
+  const supplierIndex = uploadedHeaders.indexOf("Supplier");
+  const uniqueSuppliers = supplierIndex >= 0
+    ? [...new Set(
+        uploadedData
+          .map(row => (row[supplierIndex] || "").trim())
+          .filter(value => value !== "")
+      )]
+    : [];
+
+  const unitCostIndex = uploadedHeaders.indexOf("UnitCost");
+  const currentStockIndex = uploadedHeaders.indexOf("CurrentStock");
+  let totalCurrentStockValue = 0;
+  let hasAnyStockValue = false;
+
+  if (unitCostIndex >= 0 && currentStockIndex >= 0) {
+    uploadedData.forEach(row => {
+      const stock = parseFloat(row[currentStockIndex]) || 0;
+      const unitCost = parseFloat(row[unitCostIndex]);
+      if (!isNaN(unitCost) && unitCost > 0) {
+        totalCurrentStockValue += stock * unitCost;
+        hasAnyStockValue = true;
+      }
+    });
+  }
+
+  const forecastBasis = hasHistoryColumns
+    ? "3-month history (M1, M2, M3)"
+    : hasMonthlyDemandColumn
+      ? "MonthlyDemand"
+      : "Unknown";
+
+  fileSummaryPanel.innerHTML = `
+    <div class="table-wrap" style="margin-top:0;">
+      <table style="min-width:0;">
+        <tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>Total Rows Loaded</td><td>${uploadedData.length}</td></tr>
+        <tr><td>Valid SKUs</td><td>${validRows.length}</td></tr>
+        <tr><td>Invalid / Skipped Rows</td><td>${invalidRowCount}</td></tr>
+        <tr><td>Columns Detected</td><td>${uploadedHeaders.length}</td></tr>
+        <tr><td>Forecast Basis</td><td>${forecastBasis}</td></tr>
+        <tr><td>Suppliers Detected</td><td>${uniqueSuppliers.length || "-"}</td></tr>
+        <tr><td>URGENT</td><td>${urgentCount}</td></tr>
+        <tr><td>LOW</td><td>${lowCount}</td></tr>
+        <tr><td>OK</td><td>${okCount}</td></tr>
+        <tr><td>Total Current Stock Value</td><td>${hasAnyStockValue ? "£" + totalCurrentStockValue.toFixed(2) : "N/A"}</td></tr>
+      </table>
+    </div>
+  `;
 }
 
 function renderGoldOverview() {
