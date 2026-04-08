@@ -391,7 +391,7 @@ function renderResultsTable(rows) {
 
 function selectSKU(encodedRow) {
   const row = JSON.parse(decodeURIComponent(encodedRow));
-  runSingleSKU(row);
+  SKU(row);
 }
 
 // =========================
@@ -519,187 +519,144 @@ function calculateSkuMetrics(row) {
 }
 
 function runSingleSKU(row) {
-  const get = (name) => {
-    const idx = uploadedHeaders.indexOf(name);
-    return idx >= 0 ? row[idx] : "";
-  };
+  const metrics = calculateSkuMetrics(row);
 
-  const sku = get("SKU");
-  const description = get("Description");
-  const stock = parseFloat(get("CurrentStock"));
-  const lead = parseFloat(get("LeadTimeDays"));
-  const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
-  const rawUnitCost = parseFloat(get("UnitCost"));
-  const unitCost = isNaN(rawUnitCost) ? 0 : rawUnitCost;
-  const moq = parseFloat(get("MOQ")) || 0;
-  const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
-
-  let forecast = 0;
-  let forecastMethod = "";
-
-  const hasHistory = uploadedHeaders.includes("M1") && uploadedHeaders.includes("M2") && uploadedHeaders.includes("M3");
-
-  if (hasHistory) {
-    const m1 = parseFloat(get("M1")) || 0;
-    const m2 = parseFloat(get("M2")) || 0;
-    const m3 = parseFloat(get("M3")) || 0;
-    forecast = (m1 + m2 + m3) / 3;
-    forecastMethod = "3-month average";
-  } else {
-    forecast = parseFloat(get("MonthlyDemand"));
-    forecastMethod = "manual monthly demand";
-  }
-
-  if (isNaN(stock) || isNaN(lead) || isNaN(forecast) || forecast <= 0) {
+  if (!metrics.valid) {
     document.getElementById("cb1Panel").innerHTML = "This SKU does not have valid data.";
     return;
   }
 
-  const daily = forecast / 30;
-  const safetyDays = 7;
-
-  let recommendedSafetyStock = daily * safetyDays;
-  const uploadedSafety = parseFloat(get("SafetyStock"));
-  if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
-    recommendedSafetyStock = uploadedSafety;
-  }
-
-  const effectiveStock = stock + onOrderQty;
-  const reorderPoint = (daily * lead) + recommendedSafetyStock;
-  const maxStockLevel = reorderPoint + forecast;
-  
-  let reorderQty = calculateTopUpOrderQty(
-    effectiveStock,
-    maxStockLevel,
+  const {
+    sku,
+    description,
+    stock,
+    lead,
+    onOrderQty,
+    unitCost,
     moq,
-    orderMultiple
+    orderMultiple,
+    forecast,
+    forecastMethod,
+    safetyStock,
+    effectiveStock,
+    reorderPoint,
+    maxStockLevel,
+    reorderQty,
+    daysToStockout,
+    status,
+    color,
+    spend
+  } = metrics;
+
+  const message = getDynamicMessage(
+    status === "URGENT" ? 1 : 0,
+    status === "LOW" ? 1 : 0,
+    1
   );
 
-  let projectedStock = effectiveStock;
-  let day = 0;
-  let runoutDay = null;
-
-  while (projectedStock > 0 && day < 365) {
-    projectedStock -= daily;
-    day++;
-    if (projectedStock <= 0 && runoutDay === null) {
-      runoutDay = day;
-    }
-  }
-
-  const daysToStockout = runoutDay || 999;
-
-  let status = "OK";
-  let color = "#22c55e";
-
-  if (daysToStockout < lead) {
-    status = "URGENT";
-    color = "#ef4444";
-  } else if (daysToStockout < lead + safetyDays) {
-    status = "LOW";
-    color = "#f59e0b";
-  }
-
-  const message = getDynamicMessage(status === "URGENT" ? 1 : 0, status === "LOW" ? 1 : 0, 1);
-  const spend = unitCost > 0 ? "£" + (reorderQty * unitCost).toFixed(2) : "N/A";
+  const spendLabel = spend !== null ? "£" + spend.toFixed(2) : "N/A";
 
   const reason =
     `You will run out in ${daysToStockout} days. ` +
     `Lead time is ${lead} days. ` +
-    `Safety buffer is ${Math.ceil(recommendedSafetyStock)} units. ` +
+    `Safety buffer is ${Math.ceil(safetyStock)} units. ` +
     `CB1 recommends topping stock back up toward ${Math.ceil(maxStockLevel)} units. ` +
     `Forecast based on ${forecastMethod}.`;
 
   const projectionData = buildProjectionData(
-  effectiveStock,
-  forecast,
-  recommendedSafetyStock,
-  lead,
-  moq,
-  orderMultiple
-);
+    effectiveStock,
+    forecast,
+    safetyStock,
+    lead,
+    moq,
+    orderMultiple
+  );
 
-let safetyBreachDay = projectionData.projectedStock.findIndex((v, i) => i > 0 && v < recommendedSafetyStock);
-let zeroBreachDay = projectionData.projectedStock.findIndex((v, i) => i > 0 && v <= 0);
-const horizonLabel = `${projectionData.labels.length - 1} day${projectionData.labels.length - 1 > 1 ? "s" : ""}`;
+  const safetyBreachDay = projectionData.projectedStock.findIndex(
+    (v, i) => i > 0 && v < safetyStock
+  );
+  const zeroBreachDay = projectionData.projectedStock.findIndex(
+    (v, i) => i > 0 && v <= 0
+  );
+  const horizonLabel = `${projectionData.labels.length - 1} day${projectionData.labels.length - 1 > 1 ? "s" : ""}`;
 
-const safetyBreachLabel = safetyBreachDay >= 0 ? projectionData.labels[safetyBreachDay] : null;
-const zeroBreachLabel = zeroBreachDay >= 0 ? projectionData.labels[zeroBreachDay] : null;
+  const safetyBreachLabel = safetyBreachDay >= 0 ? projectionData.labels[safetyBreachDay] : null;
+  const zeroBreachLabel = zeroBreachDay >= 0 ? projectionData.labels[zeroBreachDay] : null;
 
-const breachText = `
-  ${
-    safetyBreachLabel
-      ? `Without action, stock breaches safety stock on ${safetyBreachLabel}`
-      : `Without action, stock stays above safety stock across the ${horizonLabel} view.`
-  }
-  ${
-    zeroBreachLabel
-      ? `and reaches zero on ${zeroBreachLabel}.`
-      : `and, stock does not hit zero across the ${horizonLabel} view.`
-  }
-  The dashed green line shows guided replenishment using CB1’s min/max logic, topping stock back up toward the target max level after lead time.
-`;
+  const breachText = `
+    ${
+      safetyBreachLabel
+        ? `Without action, stock breaches safety stock on ${safetyBreachLabel}`
+        : `Without action, stock stays above safety stock across the ${horizonLabel} view.`
+    }
+    ${
+      zeroBreachLabel
+        ? `and reaches zero on ${zeroBreachLabel}.`
+        : `and stock does not hit zero across the ${horizonLabel} view.`
+    }
+    The dashed green line shows guided replenishment using CB1’s min/max logic, topping stock back up toward the target max level after lead time.
+  `;
 
-const html = `
-  <h3>${sku} - ${description}</h3>
+  const html = `
+    <h3>${sku} - ${description}</h3>
 
-  <div class="summary-strip">
-    <div class="summary-card">
-      <h4>Status</h4>
-      <p style="color:${color};">${status}</p>
+    <div class="summary-strip">
+      <div class="summary-card">
+        <h4>Status</h4>
+        <p style="color:${color};">${status}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Forecast</h4>
+        <p>${forecast.toFixed(0)}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Days to Stockout</h4>
+        <p>${daysToStockout}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Suggested Order Qty</h4>
+        <p>${Math.ceil(reorderQty)}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Estimated Spend</h4>
+        <p>${spendLabel}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Safety Stock</h4>
+        <p>${Math.ceil(safetyStock)}</p>
+      </div>
     </div>
-    <div class="summary-card">
-      <h4>Forecast</h4>
-      <p>${forecast.toFixed(0)}</p>
-    </div>
-    <div class="summary-card">
-      <h4>Days to Stockout</h4>
-      <p>${daysToStockout}</p>
-    </div>
-    <div class="summary-card">
-      <h4>Suggested Order Qty</h4>
-      <p>${Math.ceil(reorderQty)}</p>
-    </div>
-    <div class="summary-card">
-      <h4>Estimated Spend</h4>
-      <p>${spend}</p>
-    </div>
-    <div class="summary-card">
-      <h4>Safety Stock</h4>
-      <p>${Math.ceil(recommendedSafetyStock)}</p>
-    </div>
-  </div>
 
-  <div class="signal-box" style="color:${color}; border:1px solid ${color};">
-    ${message}
-  </div>
-
-  <div class="panel" style="margin-top:15px;">
-    <h3 style="margin-top:0;">Projection</h3>
-    <div style="height:320px;">
-      <canvas id="projectionChart"></canvas>
+    <div class="signal-box" style="color:${color}; border:1px solid ${color};">
+      ${message}
     </div>
-    <p class="muted">${breachText}</p>
-  </div>
 
-  <div class="table-wrap">
-    <table>
-      <tr><th>Metric</th><th>Value</th></tr>
-      <tr><td>Current Stock</td><td>${stock}</td></tr>
-      <tr><td>On Order Qty</td><td>${onOrderQty}</td></tr>
-      <tr><td>Effective Stock</td><td>${effectiveStock}</td></tr>
-      <tr><td>Lead Time Days</td><td>${lead}</td></tr>
-      <tr><td>Forecast</td><td>${forecast.toFixed(0)} per month</td></tr>
-      <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
-      <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
-      <tr><td>Max Stock Level</td><td>${Math.ceil(maxStockLevel)}</td></tr>
-      <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
-      <tr><td>Order Multiple</td><td>${orderMultiple || "-"}</td></tr>
-      <tr><td class="reason">Reason</td><td class="reason">${reason}</td></tr>
-    </table>
-  </div>
-`;
+    <div class="panel" style="margin-top:15px;">
+      <h3 style="margin-top:0;">Projection</h3>
+      <div style="height:320px;">
+        <canvas id="projectionChart"></canvas>
+      </div>
+      <p class="muted">${breachText}</p>
+    </div>
 
-document.getElementById("cb1Panel").innerHTML = html;
-renderProjectionChart("projectionChart", projectionData);
+    <div class="table-wrap">
+      <table>
+        <tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>Current Stock</td><td>${stock}</td></tr>
+        <tr><td>On Order Qty</td><td>${onOrderQty}</td></tr>
+        <tr><td>Effective Stock</td><td>${effectiveStock}</td></tr>
+        <tr><td>Lead Time Days</td><td>${lead}</td></tr>
+        <tr><td>Forecast</td><td>${forecast.toFixed(0)} per month</td></tr>
+        <tr><td>Forecast Method</td><td>${forecastMethod}</td></tr>
+        <tr><td>Reorder Point</td><td>${Math.ceil(reorderPoint)}</td></tr>
+        <tr><td>Max Stock Level</td><td>${Math.ceil(maxStockLevel)}</td></tr>
+        <tr><td>MOQ</td><td>${moq || "-"}</td></tr>
+        <tr><td>Order Multiple</td><td>${orderMultiple || "-"}</td></tr>
+        <tr><td class="reason">Reason</td><td class="reason">${reason}</td></tr>
+      </table>
+    </div>
+  `;
+
+  document.getElementById("cb1Panel").innerHTML = html;
+  renderProjectionChart("projectionChart", projectionData);
 }
