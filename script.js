@@ -335,10 +335,202 @@ function handleUpload() {
       `File loaded: ${uploadedData.length} SKU rows ready. Search to begin.`;
 
     renderResultsTable(uploadedData.slice(0, 25));
+    renderGoldOverview();
     document.getElementById("cb1Panel").innerHTML = "Select an SKU from the left to load the CB1 view.";
   };
 
   reader.readAsText(file);
+}
+
+function calculateOverviewMetrics(row) {
+  const get = (name) => {
+    const idx = uploadedHeaders.indexOf(name);
+    return idx >= 0 ? row[idx] : "";
+  };
+
+  const sku = get("SKU");
+  const description = get("Description");
+  const stock = parseFloat(get("CurrentStock"));
+  const lead = parseFloat(get("LeadTimeDays"));
+  const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
+  const unitCost = parseFloat(get("UnitCost")) || 0;
+
+  let forecast = 0;
+
+  const hasHistory =
+    uploadedHeaders.includes("M1") &&
+    uploadedHeaders.includes("M2") &&
+    uploadedHeaders.includes("M3");
+
+  if (hasHistory) {
+    const m1 = parseFloat(get("M1")) || 0;
+    const m2 = parseFloat(get("M2")) || 0;
+    const m3 = parseFloat(get("M3")) || 0;
+    forecast = (m1 + m2 + m3) / 3;
+  } else {
+    forecast = parseFloat(get("MonthlyDemand"));
+  }
+
+  if (isNaN(stock) || isNaN(lead) || isNaN(forecast) || forecast <= 0) {
+    return null;
+  }
+
+  const daily = forecast / 30;
+  const safetyDays = 7;
+
+  let safetyStock = daily * safetyDays;
+  const uploadedSafety = parseFloat(get("SafetyStock"));
+  if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
+    safetyStock = uploadedSafety;
+  }
+
+  const effectiveStock = stock + onOrderQty;
+  const reorderPoint = (daily * lead) + safetyStock;
+  const maxStockLevel = reorderPoint + forecast;
+
+  const moq = parseFloat(get("MOQ")) || 0;
+  const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
+
+  const suggestedOrderQty = calculateTopUpOrderQty(
+    effectiveStock,
+    maxStockLevel,
+    moq,
+    orderMultiple
+  );
+
+  let projectedStock = effectiveStock;
+  let day = 0;
+  let runoutDay = null;
+
+  while (projectedStock > 0 && day < 365) {
+    projectedStock -= daily;
+    day++;
+    if (projectedStock <= 0 && runoutDay === null) {
+      runoutDay = day;
+    }
+  }
+
+  const daysToStockout = runoutDay || 999;
+
+  let status = "OK";
+  let color = "#22c55e";
+
+  if (daysToStockout < lead) {
+    status = "URGENT";
+    color = "#ef4444";
+  } else if (daysToStockout < lead + safetyDays) {
+    status = "LOW";
+    color = "#f59e0b";
+  }
+
+  return {
+    sku,
+    description,
+    effectiveStock,
+    forecast,
+    lead,
+    reorderPoint,
+    suggestedOrderQty,
+    daysToStockout,
+    status,
+    color,
+    estimatedSpend: unitCost > 0 ? suggestedOrderQty * unitCost : null
+  };
+}
+
+function renderGoldOverview() {
+  if (!uploadedData.length) {
+    document.getElementById("goldOverviewPanel").innerHTML = "Upload a file to generate the overview.";
+    return;
+  }
+
+  const overviewRows = uploadedData
+    .map(calculateOverviewMetrics)
+    .filter(row => row !== null)
+    .sort((a, b) => {
+      const priority = { URGENT: 0, LOW: 1, OK: 2 };
+      const statusDiff = priority[a.status] - priority[b.status];
+      if (statusDiff !== 0) return statusDiff;
+      return a.daysToStockout - b.daysToStockout;
+    });
+
+  const urgentCount = overviewRows.filter(x => x.status === "URGENT").length;
+  const lowCount = overviewRows.filter(x => x.status === "LOW").length;
+  const okCount = overviewRows.filter(x => x.status === "OK").length;
+  const totalSpend = overviewRows.reduce((sum, x) => sum + (x.estimatedSpend || 0), 0);
+
+  let html = `
+    <div class="summary-strip">
+      <div class="summary-card">
+        <h4>Total Valid SKUs</h4>
+        <p>${overviewRows.length}</p>
+      </div>
+      <div class="summary-card">
+        <h4>URGENT</h4>
+        <p style="color:#ef4444;">${urgentCount}</p>
+      </div>
+      <div class="summary-card">
+        <h4>LOW</h4>
+        <p style="color:#f59e0b;">${lowCount}</p>
+      </div>
+      <div class="summary-card">
+        <h4>OK</h4>
+        <p style="color:#22c55e;">${okCount}</p>
+      </div>
+      <div class="summary-card">
+        <h4>Total Suggested Spend</h4>
+        <p>£${totalSpend.toFixed(2)}</p>
+      </div>
+    </div>
+  `;
+
+  if (!overviewRows.length) {
+    html += `<p class="muted">No valid SKU rows found for overview.</p>`;
+    document.getElementById("goldOverviewPanel").innerHTML = html;
+    return;
+  }
+
+  html += `
+    <div class="table-wrap">
+      <table>
+        <tr>
+          <th>SKU</th>
+          <th>Description</th>
+          <th>Status</th>
+          <th>Effective Stock</th>
+          <th>Forecast</th>
+          <th>Lead Time</th>
+          <th>Reorder Point</th>
+          <th>Suggested Order Qty</th>
+          <th>Days to Stockout</th>
+          <th>Est. Spend</th>
+        </tr>
+  `;
+
+  overviewRows.slice(0, 20).forEach(row => {
+    html += `
+      <tr>
+        <td>${row.sku}</td>
+        <td>${row.description}</td>
+        <td style="color:${row.color}; font-weight:bold;">${row.status}</td>
+        <td>${Math.ceil(row.effectiveStock)}</td>
+        <td>${Math.ceil(row.forecast)}</td>
+        <td>${row.lead}</td>
+        <td>${Math.ceil(row.reorderPoint)}</td>
+        <td>${Math.ceil(row.suggestedOrderQty)}</td>
+        <td>${row.daysToStockout}</td>
+        <td>${row.estimatedSpend !== null ? "£" + row.estimatedSpend.toFixed(2) : "N/A"}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+      </table>
+    </div>
+    <p class="muted">Showing top 20 SKUs by urgency. Existing search and CB1 drilldown remain unchanged.</p>
+  `;
+
+  document.getElementById("goldOverviewPanel").innerHTML = html;
 }
 
 // =========================
