@@ -435,7 +435,10 @@ function calculateOverviewMetrics(row) {
 }
 
 function renderGoldOverview() {
-  const existingSearch = document.getElementById("skuSearch") ? document.getElementById("skuSearch").value : "";
+  const existingSearch = document.getElementById("skuSearch")
+    ? document.getElementById("skuSearch").value
+    : "";
+
   if (!uploadedData.length) {
     document.getElementById("goldOverviewPanel").innerHTML = "Upload a file to generate the overview.";
     return;
@@ -457,7 +460,6 @@ function renderGoldOverview() {
   const totalSpend = overviewRows.reduce((sum, x) => sum + (x.estimatedSpend || 0), 0);
 
   let html = `
-    let html = `
     <div style="margin-bottom:15px;">
       <input
         type="text"
@@ -517,7 +519,7 @@ function renderGoldOverview() {
         </tr>
   `;
 
-  overviewRows.slice(0, 20).forEach(overviewRow => {
+  overviewRows.forEach(overviewRow => {
     const sourceRow = uploadedData.find(row => {
       const skuIndex = uploadedHeaders.indexOf("SKU");
       const descIndex = uploadedHeaders.indexOf("Description");
@@ -547,14 +549,17 @@ function renderGoldOverview() {
   html += `
       </table>
     </div>
-    <p class="muted">Showing top 20 SKUs by urgency. Click any row to load the CB1 drilldown.</p>
+    <p class="muted">Showing all valid SKUs, sorted by urgency and earliest stockout first. Click any row to load the CB1 drilldown.</p>
   `;
 
   document.getElementById("goldOverviewPanel").innerHTML = html;
 }
 
 function renderGoldOverviewFiltered(filteredRows) {
-  const existingSearch = document.getElementById("skuSearch") ? document.getElementById("skuSearch").value : "";
+  const existingSearch = document.getElementById("skuSearch")
+    ? document.getElementById("skuSearch").value
+    : "";
+
   const overviewRows = filteredRows
     .map(calculateOverviewMetrics)
     .filter(row => row !== null)
@@ -564,12 +569,6 @@ function renderGoldOverviewFiltered(filteredRows) {
       if (statusDiff !== 0) return statusDiff;
       return a.daysToStockout - b.daysToStockout;
     });
-
-  if (!overviewRows.length) {
-    document.getElementById("goldOverviewPanel").innerHTML =
-      "<p class='muted'>No matching SKUs found.</p>";
-    return;
-  }
 
   let html = `
     <div style="margin-bottom:15px;">
@@ -583,7 +582,15 @@ function renderGoldOverviewFiltered(filteredRows) {
       >
       <div class="muted">Click any row to load the CB1 drilldown.</div>
     </div>
+  `;
 
+  if (!overviewRows.length) {
+    html += `<p class="muted">No matching SKUs found.</p>`;
+    document.getElementById("goldOverviewPanel").innerHTML = html;
+    return;
+  }
+
+  html += `
     <div class="table-wrap">
       <table>
         <tr>
@@ -630,64 +637,10 @@ function renderGoldOverviewFiltered(filteredRows) {
   html += `
       </table>
     </div>
+    <p class="muted">Filtered results, sorted by urgency and earliest stockout first. Click any row to load the CB1 drilldown.</p>
   `;
 
   document.getElementById("goldOverviewPanel").innerHTML = html;
-}
-
-// =========================
-// Search / Results
-// =========================
-
-function handleSearch() {
-  if (!uploadedData.length) return;
-
-  const query = document.getElementById("skuSearch").value.toLowerCase();
-
-  if (!query) {
-    renderGoldOverview();
-    return;
-  }
-
-  const filteredData = uploadedData.filter(row => {
-    const skuIndex = uploadedHeaders.indexOf("SKU");
-    const descIndex = uploadedHeaders.indexOf("Description");
-
-    const sku = skuIndex >= 0 ? (row[skuIndex] || "").toLowerCase() : "";
-    const desc = descIndex >= 0 ? (row[descIndex] || "").toLowerCase() : "";
-
-    return sku.includes(query) || desc.includes(query);
-  });
-
-  renderGoldOverviewFiltered(filteredData);
-}
-
-function renderResultsTable(rows) {
-  const skuIndex = uploadedHeaders.indexOf("SKU");
-  const descIndex = uploadedHeaders.indexOf("Description");
-
-  if (!rows.length) {
-    document.getElementById("resultsPanel").innerHTML = "No matching SKUs found.";
-    return;
-  }
-
-  let html = "<div class='table-wrap'><table><tr><th>SKU</th><th>Description</th></tr>";
-
-  rows.forEach(row => {
-    const sku = row[skuIndex] || "";
-    const desc = row[descIndex] || "";
-    const safeRow = encodeURIComponent(JSON.stringify(row));
-
-    html += `
-      <tr class="result-row" onclick="selectSKU('${safeRow}')">
-        <td>${sku}</td>
-        <td>${desc}</td>
-      </tr>
-    `;
-  });
-
-  html += "</table></div>";
-  document.getElementById("resultsPanel").innerHTML = html;
 }
 
 function selectSKU(encodedRow) {
