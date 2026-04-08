@@ -398,6 +398,126 @@ function selectSKU(encodedRow) {
 // CB1 Single SKU View
 // =========================
 
+function calculateSkuMetrics(row) {
+  const get = (name) => {
+    const idx = uploadedHeaders.indexOf(name);
+    return idx >= 0 ? row[idx] : "";
+  };
+
+  const sku = get("SKU");
+  const description = get("Description");
+  const stock = parseFloat(get("CurrentStock"));
+  const lead = parseFloat(get("LeadTimeDays"));
+  const onOrderQty = parseFloat(get("OnOrderQty")) || 0;
+  const rawUnitCost = parseFloat(get("UnitCost"));
+  const unitCost = isNaN(rawUnitCost) ? 0 : rawUnitCost;
+  const moq = parseFloat(get("MOQ")) || 0;
+  const orderMultiple = parseFloat(get("OrderMultiple")) || 1;
+  const supplier = get("Supplier") || "";
+
+  let forecast = 0;
+  let forecastMethod = "";
+
+  const hasHistory =
+    uploadedHeaders.includes("M1") &&
+    uploadedHeaders.includes("M2") &&
+    uploadedHeaders.includes("M3");
+
+  if (hasHistory) {
+    const m1 = parseFloat(get("M1")) || 0;
+    const m2 = parseFloat(get("M2")) || 0;
+    const m3 = parseFloat(get("M3")) || 0;
+    forecast = (m1 + m2 + m3) / 3;
+    forecastMethod = "3-month average";
+  } else {
+    forecast = parseFloat(get("MonthlyDemand"));
+    forecastMethod = "manual monthly demand";
+  }
+
+  if (isNaN(stock) || isNaN(lead) || isNaN(forecast) || forecast <= 0) {
+    return {
+      valid: false,
+      sku,
+      description,
+      supplier
+    };
+  }
+
+  const dailyDemand = forecast / 30;
+  const safetyDays = 7;
+
+  let safetyStock = dailyDemand * safetyDays;
+  const uploadedSafety = parseFloat(get("SafetyStock"));
+  if (!isNaN(uploadedSafety) && uploadedSafety > 0) {
+    safetyStock = uploadedSafety;
+  }
+
+  const effectiveStock = stock + onOrderQty;
+  const reorderPoint = (dailyDemand * lead) + safetyStock;
+  const maxStockLevel = reorderPoint + forecast;
+
+  const reorderQty = calculateTopUpOrderQty(
+    effectiveStock,
+    maxStockLevel,
+    moq,
+    orderMultiple
+  );
+
+  let projectedStock = effectiveStock;
+  let day = 0;
+  let runoutDay = null;
+
+  while (projectedStock > 0 && day < 365) {
+    projectedStock -= dailyDemand;
+    day++;
+    if (projectedStock <= 0 && runoutDay === null) {
+      runoutDay = day;
+    }
+  }
+
+  const daysToStockout = runoutDay || 999;
+
+  let status = "OK";
+  let color = "#22c55e";
+
+  if (daysToStockout < lead) {
+    status = "URGENT";
+    color = "#ef4444";
+  } else if (daysToStockout < lead + safetyDays) {
+    status = "LOW";
+    color = "#f59e0b";
+  }
+
+  const spend = unitCost > 0 ? reorderQty * unitCost : null;
+
+  return {
+    valid: true,
+    row,
+    sku,
+    description,
+    supplier,
+    stock,
+    lead,
+    onOrderQty,
+    unitCost,
+    moq,
+    orderMultiple,
+    forecast,
+    forecastMethod,
+    dailyDemand,
+    safetyDays,
+    safetyStock,
+    effectiveStock,
+    reorderPoint,
+    maxStockLevel,
+    reorderQty,
+    daysToStockout,
+    status,
+    color,
+    spend
+  };
+}
+
 function runSingleSKU(row) {
   const get = (name) => {
     const idx = uploadedHeaders.indexOf(name);
