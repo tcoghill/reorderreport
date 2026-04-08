@@ -273,6 +273,13 @@ function getDynamicMessage(urgent, low, total) {
 // Upload / Reset
 // =========================
 
+function triggerFileUpload() {
+  const fileInput = document.getElementById("fileInput");
+  if (fileInput) {
+    fileInput.click();
+  }
+}
+
 function resetTool() {
   uploadedData = [];
   uploadedHeaders = [];
@@ -297,10 +304,7 @@ function resetTool() {
 
 function handleUpload() {
   const file = document.getElementById("fileInput").files[0];
-
-  if (!file) {
-    document.getElementById("uploadStatus").innerHTML = "Please upload a CSV file.";
-    return;
+  if (!file) return;
   }
 
   const reader = new FileReader();
