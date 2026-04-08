@@ -285,6 +285,7 @@ function resetTool() {
   document.getElementById("skuSearch").disabled = true;
   document.getElementById("uploadStatus").innerHTML = "";
   document.getElementById("resultsPanel").innerHTML = "Upload a file to begin.";
+  document.getElementById("goldOverviewPanel").innerHTML = "Upload a file to generate the overview.";
   document.getElementById("cb1Panel").innerHTML = "Select an SKU to load the CB1 view.";
 }
 
