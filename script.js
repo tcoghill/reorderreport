@@ -281,8 +281,6 @@ function resetTool() {
   uploadedData = [];
   uploadedHeaders = [];
   document.getElementById("fileInput").value = "";
-  document.getElementById("skuSearch").value = "";
-  document.getElementById("skuSearch").disabled = true;
   document.getElementById("uploadStatus").innerHTML = "";
   document.getElementById("goldOverviewPanel").innerHTML = "Upload a file to generate the overview.";
   document.getElementById("cb1Panel").innerHTML = "Select a SKU to load the CB1 view.";
@@ -330,7 +328,6 @@ function handleUpload() {
     uploadedHeaders = headers;
     uploadedData = data.filter(row => row.length > 0 && row.some(cell => cell !== ""));
 
-    document.getElementById("skuSearch").disabled = false;
     document.getElementById("uploadStatus").innerHTML =
       `File loaded: ${uploadedData.length} SKU rows ready. Search to begin.`;
 
@@ -438,6 +435,7 @@ function calculateOverviewMetrics(row) {
 }
 
 function renderGoldOverview() {
+  const existingSearch = document.getElementById("skuSearch") ? document.getElementById("skuSearch").value : "";
   if (!uploadedData.length) {
     document.getElementById("goldOverviewPanel").innerHTML = "Upload a file to generate the overview.";
     return;
@@ -459,6 +457,19 @@ function renderGoldOverview() {
   const totalSpend = overviewRows.reduce((sum, x) => sum + (x.estimatedSpend || 0), 0);
 
   let html = `
+    let html = `
+    <div style="margin-bottom:15px;">
+      <input
+        type="text"
+        id="skuSearch"
+        placeholder="Filter by SKU or description..."
+        value="${existingSearch}"
+        oninput="handleSearch()"
+        style="margin-top:0;"
+      >
+      <div class="muted">Click any row to load the CB1 drilldown.</div>
+    </div>
+
     <div class="summary-strip">
       <div class="summary-card">
         <h4>Total Valid SKUs</h4>
@@ -543,6 +554,7 @@ function renderGoldOverview() {
 }
 
 function renderGoldOverviewFiltered(filteredRows) {
+  const existingSearch = document.getElementById("skuSearch") ? document.getElementById("skuSearch").value : "";
   const overviewRows = filteredRows
     .map(calculateOverviewMetrics)
     .filter(row => row !== null)
@@ -560,6 +572,18 @@ function renderGoldOverviewFiltered(filteredRows) {
   }
 
   let html = `
+    <div style="margin-bottom:15px;">
+      <input
+        type="text"
+        id="skuSearch"
+        placeholder="Filter by SKU or description..."
+        value="${existingSearch}"
+        oninput="handleSearch()"
+        style="margin-top:0;"
+      >
+      <div class="muted">Click any row to load the CB1 drilldown.</div>
+    </div>
+
     <div class="table-wrap">
       <table>
         <tr>
