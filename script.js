@@ -305,7 +305,6 @@ function resetTool() {
 function handleUpload() {
   const file = document.getElementById("fileInput").files[0];
   if (!file) return;
-  }
 
   const reader = new FileReader();
 
