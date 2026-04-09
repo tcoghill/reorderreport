@@ -78,6 +78,28 @@ button {
   font-size: 15px;
 }
 
+.action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.action-row button {
+  width: 100%;
+  margin-top: 0;
+}
+
+.subheading {
+  margin-top: 18px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: bold;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .summary-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
