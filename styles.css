@@ -25,6 +25,10 @@ body {
   box-sizing: border-box;
 }
 
+.panel h2 {
+  text-align: center;
+}
+
 .top-row {
   display: grid;
   grid-template-columns: 380px 1fr;
@@ -35,10 +39,6 @@ body {
 
 .compact-panel {
   min-height: auto;
-}
-
-.compact-panel h2 {
-  text-align: center;
 }
 
 .cb1-panel {
