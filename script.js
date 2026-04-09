@@ -340,9 +340,6 @@ function handleUpload() {
     uploadedHeaders = headers;
     uploadedData = data.filter(row => row.length > 0 && row.some(cell => cell !== ""));
 
-    document.getElementById("uploadStatus").innerHTML =
-      `File loaded: ${uploadedData.length} SKU rows ready. Gold Overview generated.`;
-
     renderFileSummary();
     renderGoldOverview();
     document.getElementById("cb1Panel").innerHTML = "Select a SKU from the Gold Overview table to load the CB1 view.";
